@@ -22,7 +22,7 @@ interface WizardState {
   _id?: ObjectId;
   tgUserId: number;
   tgChatId: number;
-  step: "name" | "description" | "systemPrompt" | "visibility" | "import";
+  step: "name" | "description" | "systemPrompt" | "visibility" | "import" | "profile_name" | "profile_description";
   data: {
     name?: string;
     description?: string;
@@ -98,6 +98,16 @@ export class TelegramBot {
         return;
       }
 
+      if (command === "/cancel") {
+        await this.db.collection<WizardState>("tgWizardState").deleteOne({ tgUserId: from.id, tgChatId: chat.id });
+        await this.sendTelegram("sendMessage", {
+          chat_id: chat.id,
+          message_thread_id: threadId,
+          text: "❌ Wizard or active action has been cancelled.",
+        });
+        return;
+      }
+
       // Verification: must be run in a forum supergroup
       if (!isForum) {
         await this.sendTelegram("sendMessage", {
@@ -142,6 +152,8 @@ export class TelegramBot {
         await this.handleImport(chat.id, from.id, link.clerkUserId, url, threadId);
       } else if (command === "/characters") {
         await this.listCharacters(chat.id, from.id, link.clerkUserId, threadId);
+      } else if (command === "/profile") {
+        await this.showProfile(chat.id, from.id, link.clerkUserId, threadId);
       }
     } else {
       // It's not a command. Check if user is in character creation wizard
@@ -261,6 +273,42 @@ export class TelegramBot {
       await this.showCharacterDetails(message.chat.id, link.clerkUserId, charId, threadId, message.message_id);
     } else if (data.startsWith("list_chars:")) {
       await this.listCharacters(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id);
+    } else if (data === "profile_edit:name") {
+      await this.db.collection<WizardState>("tgWizardState").updateOne(
+        { tgUserId: from.id, tgChatId: message.chat.id },
+        {
+          $set: {
+            step: "profile_name",
+            data: {},
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+      await this.sendTelegram("sendMessage", {
+        chat_id: message.chat.id,
+        message_thread_id: threadId,
+        text: "Please send your new display name (or type /cancel to abort):",
+      });
+    } else if (data === "profile_edit:bio") {
+      await this.db.collection<WizardState>("tgWizardState").updateOne(
+        { tgUserId: from.id, tgChatId: message.chat.id },
+        {
+          $set: {
+            step: "profile_description",
+            data: {},
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+      await this.sendTelegram("sendMessage", {
+        chat_id: message.chat.id,
+        message_thread_id: threadId,
+        text: "Please send your new profile bio/description (or type /cancel to abort):",
+      });
+    } else if (data === "profile_refresh") {
+      await this.showProfile(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id);
     }
   }
 
@@ -325,6 +373,71 @@ export class TelegramBot {
     if (wizard.step === "import") {
       await this.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
       await this.handleImport(chat.id, from.id, link.clerkUserId, text, threadId);
+      return;
+    }
+
+    if (wizard.step === "profile_name") {
+      await this.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+      try {
+        const response = await fetch(`${this.apiBaseUrl}/api/me`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.botSecret}`,
+            "x-clerk-user-id": link.clerkUserId,
+          },
+          body: JSON.stringify({ displayName: text }),
+        });
+        const resData = await response.json();
+        if (response.ok) {
+          await this.sendTelegram("sendMessage", {
+            chat_id: chat.id,
+            message_thread_id: threadId,
+            text: `✅ Display name successfully updated to: *${resData.user.displayName}*`,
+            parse_mode: "Markdown",
+          });
+        } else {
+          throw new Error(resData.error?.message || "Failed to update profile.");
+        }
+      } catch (err: any) {
+        await this.sendTelegram("sendMessage", {
+          chat_id: chat.id,
+          message_thread_id: threadId,
+          text: `❌ Failed to update name: ${err.message}`,
+        });
+      }
+      return;
+    }
+
+    if (wizard.step === "profile_description") {
+      await this.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+      try {
+        const response = await fetch(`${this.apiBaseUrl}/api/me`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.botSecret}`,
+            "x-clerk-user-id": link.clerkUserId,
+          },
+          body: JSON.stringify({ description: text }),
+        });
+        const resData = await response.json();
+        if (response.ok) {
+          await this.sendTelegram("sendMessage", {
+            chat_id: chat.id,
+            message_thread_id: threadId,
+            text: `✅ Bio/description successfully updated!`,
+          });
+        } else {
+          throw new Error(resData.error?.message || "Failed to update profile.");
+        }
+      } catch (err: any) {
+        await this.sendTelegram("sendMessage", {
+          chat_id: chat.id,
+          message_thread_id: threadId,
+          text: `❌ Failed to update bio: ${err.message}`,
+        });
+      }
       return;
     }
 
@@ -500,6 +613,64 @@ export class TelegramBot {
         chat_id: chatId,
         message_thread_id: threadId,
         text: `❌ Import failed: ${err.message}`,
+      });
+    }
+  }
+
+  private async showProfile(chatId: number, tgUserId: number, clerkUserId: string, threadId?: number, editMessageId?: number) {
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/api/me`, {
+        headers: {
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": clerkUserId,
+        },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Failed to fetch profile.");
+      }
+      const user = data.user;
+      const profileText = `👤 *Your Profile*\n\n` +
+        `*Name*: ${user.displayName || "Not set"}\n` +
+        `*Bio/Description*: ${user.description || "Not set"}\n` +
+        `*Clerk User ID*: \`${user.clerkUserId}\`\n` +
+        `*Email*: ${user.email || "Not set"}`;
+
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: "✏️ Edit Name", callback_data: `profile_edit:name` },
+            { text: "✏️ Edit Bio", callback_data: `profile_edit:bio` },
+          ],
+          [
+            { text: "🔄 Refresh", callback_data: `profile_refresh` },
+          ]
+        ],
+      };
+
+      if (editMessageId) {
+        await this.sendTelegram("editMessageText", {
+          chat_id: chatId,
+          message_id: editMessageId,
+          message_thread_id: threadId,
+          text: profileText,
+          parse_mode: "Markdown",
+          reply_markup: replyMarkup,
+        });
+      } else {
+        await this.sendTelegram("sendMessage", {
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text: profileText,
+          parse_mode: "Markdown",
+          reply_markup: replyMarkup,
+        });
+      }
+    } catch (err: any) {
+      await this.sendTelegram("sendMessage", {
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text: `❌ Failed to load profile: ${err.message}`,
       });
     }
   }
