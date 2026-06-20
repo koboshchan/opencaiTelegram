@@ -683,12 +683,21 @@ export class TelegramBot {
       }
 
       // Send the character's greeting directly to the topic thread
-      await this.sendTelegram("sendMessage", {
-        chat_id: chatId,
-        message_thread_id: newThreadId,
-        text: greetingText,
-        parse_mode: "Markdown",
-      });
+      try {
+        await this.sendTelegram("sendMessage", {
+          chat_id: chatId,
+          message_thread_id: newThreadId,
+          text: greetingText,
+          parse_mode: "Markdown",
+        });
+      } catch (err) {
+        // Fallback to plain text if markdown parsing fails
+        await this.sendTelegram("sendMessage", {
+          chat_id: chatId,
+          message_thread_id: newThreadId,
+          text: greetingText,
+        });
+      }
 
       // 5. Notify in Controls topic
       await this.sendTelegram("sendMessage", {
