@@ -60,6 +60,22 @@ export class TelegramBot {
     if (me?.ok) {
       this.botUsername = me.result.username;
       console.log(`Telegram Bot @${this.botUsername} initialized successfully.`);
+
+      // Register bot commands for tab-completion
+      const commands = [
+        { command: "start", description: "Start the bot and link your account" },
+        { command: "characters", description: "List your AI characters" },
+        { command: "create", description: "Create a new AI character" },
+        { command: "import", description: "Import a character from Character.AI" },
+        { command: "profile", description: "View and edit your user profile" },
+        { command: "cancel", description: "Cancel the active wizard or action" }
+      ];
+      const registerRes = await this.callTelegram("setMyCommands", { commands });
+      if (registerRes?.ok) {
+        console.log("Bot commands registered successfully for tab-completion.");
+      } else {
+        console.warn("Failed to register bot commands:", registerRes);
+      }
     } else {
       console.error("Failed to initialize bot with getMe. Check TELEGRAM_BOT_TOKEN.");
     }
