@@ -162,41 +162,45 @@ export class TelegramBot {
     // Handle Clerk redirect token linking
     // /start link_<clerkUserId>_<token>
     if (text.includes("link_")) {
-      const parts = text.split(" ")[1]?.split("_");
-      if (parts && parts.length === 3) {
-        const clerkUserId = parts[1];
-        const token = parts[2];
+      const param = text.split(" ")[1];
+      if (param && param.startsWith("link_")) {
+        const payload = param.substring(5); // remove "link_"
+        const lastUnderscore = payload.lastIndexOf("_");
+        if (lastUnderscore !== -1) {
+          const clerkUserId = payload.substring(0, lastUnderscore);
+          const token = payload.substring(lastUnderscore + 1);
 
-        const tokenDoc = await this.db.collection<AuthToken>("authTokens").findOne({ token, tgUserId: from.id });
-        if (tokenDoc) {
-          // Linked!
-          await this.db.collection<UserLink>("userLinks").updateOne(
-            { tgUserId: from.id },
-            {
-              $set: {
-                clerkUserId,
-                tgUsername: from.username || null,
-                createdAt: new Date(),
+          const tokenDoc = await this.db.collection<AuthToken>("authTokens").findOne({ token, tgUserId: from.id });
+          if (tokenDoc) {
+            // Linked!
+            await this.db.collection<UserLink>("userLinks").updateOne(
+              { tgUserId: from.id },
+              {
+                $set: {
+                  clerkUserId,
+                  tgUsername: from.username || null,
+                  createdAt: new Date(),
+                },
               },
-            },
-            { upsert: true }
-          );
+              { upsert: true }
+            );
 
-          await this.db.collection<AuthToken>("authTokens").deleteOne({ _id: tokenDoc._id });
+            await this.db.collection<AuthToken>("authTokens").deleteOne({ _id: tokenDoc._id });
 
-          await this.sendTelegram("sendMessage", {
-            chat_id: chat.id,
-            message_thread_id: threadId,
-            text: `🎉 Account successfully linked! You are logged in as Clerk User: ${clerkUserId}. You can now run bot commands.`,
-          });
-          return;
-        } else {
-          await this.sendTelegram("sendMessage", {
-            chat_id: chat.id,
-            message_thread_id: threadId,
-            text: "❌ Invalid or expired linking token. Please try again.",
-          });
-          return;
+            await this.sendTelegram("sendMessage", {
+              chat_id: chat.id,
+              message_thread_id: threadId,
+              text: `🎉 Account successfully linked! You are logged in as Clerk User: ${clerkUserId}. You can now run bot commands.`,
+            });
+            return;
+          } else {
+            await this.sendTelegram("sendMessage", {
+              chat_id: chat.id,
+              message_thread_id: threadId,
+              text: "❌ Invalid or expired linking token. Please try again.",
+            });
+            return;
+          }
         }
       }
     }
@@ -607,7 +611,11 @@ export class TelegramBot {
       });
 
       if (!topicResult?.ok) {
-        throw new Error(topicResult?.description || "Failed to create forum topic.");
+        const desc = topicResult?.description || "Failed to create forum topic.";
+        if (desc.toLowerCase().includes("rights")) {
+          throw new Error("Bad Request: not enough rights to create a topic. Please ensure the bot is promoted to an Administrator in this group chat with the 'Manage Topics' (or 'Manage Forums') permission enabled.");
+        }
+        throw new Error(desc);
       }
 
       const newThreadId = topicResult.result.message_thread_id;
@@ -642,11 +650,43 @@ export class TelegramBot {
       };
       await this.db.collection<TgChatMapping>("tgChats").insertOne(mapping);
 
-      // 4. Send Welcome Message in the new Topic
+      // 4. Trigger the first message generation (character greeting)
+      await this.sendTelegram("sendChatAction", {
+        chat_id: chatId,
+        message_thread_id: newThreadId,
+        action: "typing",
+      });
+
+      const msgResponse = await fetch(`${this.apiBaseUrl}/api/chats/${openCaiChatId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": clerkUserId,
+        },
+        body: JSON.stringify({}),
+      });
+
+      let greetingText = "";
+      if (msgResponse.ok && msgResponse.body) {
+        const reader = (msgResponse.body as any).getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          greetingText += decoder.decode(value);
+        }
+      }
+
+      if (!greetingText.trim()) {
+        greetingText = `👋 Hello! I am ${character.name}. Let's chat!`;
+      }
+
+      // Send the character's greeting directly to the topic thread
       await this.sendTelegram("sendMessage", {
         chat_id: chatId,
         message_thread_id: newThreadId,
-        text: `💬 *Chat Started with ${character.name}*\n\nSend a message in this topic to get a response!`,
+        text: greetingText,
         parse_mode: "Markdown",
       });
 
