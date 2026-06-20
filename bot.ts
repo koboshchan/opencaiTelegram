@@ -93,7 +93,11 @@ export class TelegramBot {
 
     if (isCommand) {
       const command = text.split(" ")[0].toLowerCase();
-      
+      if (command === "/start") {
+        await this.handleStart(message);
+        return;
+      }
+
       // Verification: must be run in a forum supergroup
       if (!isForum) {
         await this.sendTelegram("sendMessage", {
@@ -101,11 +105,6 @@ export class TelegramBot {
           text: "⚠️ This bot is designed to run in a Group Chat with Topics (Forum) enabled. Please add it to a topic-enabled group chat to use it.",
           reply_to_message_id: message.message_id,
         });
-        return;
-      }
-
-      if (command === "/start") {
-        await this.handleStart(message);
         return;
       }
 
@@ -202,11 +201,17 @@ export class TelegramBot {
       }
     }
 
-    // Default start response
+    const isPrivate = chat.type === "private";
+    let welcomeText = "👋 Welcome to OpenCai Bot! Link your account to start managing and chatting with AI characters.\n\nUse /characters to see your list, /create to make one, or /import to import from Character.AI.";
+    if (isPrivate) {
+      welcomeText += "\n\nℹ️ *Note*: This bot is designed to run in a Group Chat with Topics (Forum) enabled. Please add it to a topic-enabled group chat to use commands and chat with characters.";
+    }
+
     await this.sendTelegram("sendMessage", {
       chat_id: chat.id,
       message_thread_id: threadId,
-      text: "👋 Welcome to OpenCai Bot! Link your account to start managing and chatting with AI characters.\n\nUse /characters to see your list, /create to make one, or /import to import from Character.AI.",
+      text: welcomeText,
+      parse_mode: "Markdown",
     });
 
     const link = await this.getUserLink(from.id);
