@@ -108,7 +108,10 @@ export class TelegramBot {
     const isCommand = text.startsWith("/");
 
     if (isCommand) {
-      const command = text.split(" ")[0].toLowerCase();
+      let command = text.split(" ")[0].toLowerCase();
+      if (this.botUsername && command.includes(`@${this.botUsername.toLowerCase()}`)) {
+        command = command.split("@")[0];
+      }
       if (command === "/start") {
         await this.handleStart(message);
         return;
