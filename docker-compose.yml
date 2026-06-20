@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENCAI_API_BASE_URL=${OPENCAI_API_BASE_URL}
+      - TELEGRAM_BOT_SECRET=${TELEGRAM_BOT_SECRET}
+      - MONGODB_URI=${MONGODB_URI}
+    depends_on:
+      - mongo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongodata:/data/db
+    restart: unless-stopped
+    command: mongod --noauth
+
+volumes:
+  mongodata:
