@@ -22,7 +22,7 @@ interface WizardState {
   _id?: ObjectId;
   tgUserId: number;
   tgChatId: number;
-  step: "name" | "description" | "systemPrompt" | "visibility";
+  step: "name" | "description" | "systemPrompt" | "visibility" | "import";
   data: {
     name?: string;
     description?: string;
@@ -119,11 +119,22 @@ export class TelegramBot {
         await this.startCreateWizard(chat.id, from.id, threadId);
       } else if (command === "/import") {
         const parts = text.split(" ");
-        if (parts.length < 2) {
+        if (parts.length < 2 || !parts[1].trim()) {
+          await this.db.collection<WizardState>("tgWizardState").updateOne(
+            { tgUserId: from.id, tgChatId: chat.id },
+            {
+              $set: {
+                step: "import",
+                data: {},
+                updatedAt: new Date(),
+              },
+            },
+            { upsert: true }
+          );
           await this.sendTelegram("sendMessage", {
             chat_id: chat.id,
             message_thread_id: threadId,
-            text: "Usage: /import <character_ai_url>",
+            text: "Please send the Character.AI URL link you want to import.",
           });
           return;
         }
@@ -310,6 +321,12 @@ export class TelegramBot {
 
     const link = await this.getUserLink(from.id);
     if (!link) return;
+
+    if (wizard.step === "import") {
+      await this.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+      await this.handleImport(chat.id, from.id, link.clerkUserId, text, threadId);
+      return;
+    }
 
     if (wizard.step === "name") {
       await this.db.collection<WizardState>("tgWizardState").updateOne(
@@ -756,11 +773,21 @@ export class TelegramBot {
       }
 
       if (assistantText.trim()) {
-        await this.sendTelegram("sendMessage", {
-          chat_id: mapping.tgChatId,
-          message_thread_id: mapping.tgThreadId,
-          text: assistantText,
-        });
+        try {
+          await this.sendTelegram("sendMessage", {
+            chat_id: mapping.tgChatId,
+            message_thread_id: mapping.tgThreadId,
+            text: assistantText,
+            parse_mode: "Markdown",
+          });
+        } catch (err) {
+          // Fallback to plain text if Markdown parsing fails
+          await this.sendTelegram("sendMessage", {
+            chat_id: mapping.tgChatId,
+            message_thread_id: mapping.tgThreadId,
+            text: assistantText,
+          });
+        }
       }
     } catch (err: any) {
       await this.sendTelegram("sendMessage", {
