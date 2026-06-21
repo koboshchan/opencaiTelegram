@@ -101,6 +101,7 @@ export class TelegramBot {
   }
 
   async init() {
+    await this.grammyBot.init();
     const me = await this.callTelegram("getMe", {});
     if (me?.ok) {
       this.botUsername = me.result.username;
