@@ -1,5 +1,9 @@
 import { Db, ObjectId } from "mongodb";
 import crypto from "crypto";
+import { Bot, Context } from "grammy";
+import { stream, StreamFlavor } from "@grammyjs/stream";
+
+type BotContext = StreamFlavor<Context>;
 
 interface UserLink {
   _id?: ObjectId;
@@ -39,6 +43,7 @@ interface TgChatMapping {
   tgThreadId: number;
   chatId: string;
   clerkUserId: string;
+  lastAssistantTgMessageId?: number | null;
   createdAt: Date;
 }
 
@@ -48,12 +53,51 @@ export class TelegramBot {
   private apiBaseUrl: string;
   private botSecret: string;
   private botUsername: string | null = null;
+  private grammyBot: Bot<BotContext>;
 
   constructor(db: Db, botToken: string, apiBaseUrl: string, botSecret: string) {
     this.db = db;
     this.botToken = botToken;
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
     this.botSecret = botSecret;
+
+    this.grammyBot = new Bot<BotContext>(this.botToken);
+    this.grammyBot.use(stream());
+
+    this.setupGrammyHandlers();
+  }
+
+  private setupGrammyHandlers() {
+    this.grammyBot.command("regen", async (ctx) => {
+      await this.handleRegen(ctx);
+    });
+
+    this.grammyBot.on("message:text", async (ctx) => {
+      const text = ctx.message.text?.trim();
+      const chat = ctx.chat;
+      const threadId = ctx.message.message_thread_id;
+
+      if (text && !text.startsWith("/") && threadId) {
+        const mapping = await this.db.collection<TgChatMapping>("tgChats").findOne({
+          tgChatId: chat.id,
+          tgThreadId: threadId,
+        });
+        if (mapping) {
+          await this.handleChatReply(ctx, mapping);
+          return;
+        }
+      }
+
+      await this.handleMessage(ctx.message);
+    });
+
+    this.grammyBot.on("callback_query", async (ctx) => {
+      await this.handleCallbackQuery(ctx.callbackQuery);
+    });
+
+    this.grammyBot.on("message", async (ctx) => {
+      await this.handleMessage(ctx.message);
+    });
   }
 
   async init() {
@@ -69,6 +113,7 @@ export class TelegramBot {
         { command: "create", description: "Create a new AI character" },
         { command: "import", description: "Import a character from Character.AI" },
         { command: "profile", description: "View and edit your user profile" },
+        { command: "regen", description: "Regenerate the last character response" },
         { command: "cancel", description: "Cancel the active wizard or action" }
       ];
       const registerRes = await this.callTelegram("setMyCommands", { commands });
@@ -84,11 +129,7 @@ export class TelegramBot {
 
   async handleUpdate(update: any) {
     try {
-      if (update.message) {
-        await this.handleMessage(update.message);
-      } else if (update.callback_query) {
-        await this.handleCallbackQuery(update.callback_query);
-      }
+      await this.grammyBot.handleUpdate(update);
     } catch (err) {
       console.error("Error handling update:", err);
     }
@@ -915,16 +956,13 @@ export class TelegramBot {
     }
   }
 
-  private async handleChatReply(message: any, mapping: TgChatMapping) {
+  private async handleChatReply(ctx: BotContext, mapping: TgChatMapping) {
+    const message = ctx.message;
+    if (!message) return;
     const text = message.text?.trim();
     if (!text) return;
 
-    // Send typing state
-    await this.sendTelegram("sendChatAction", {
-      chat_id: mapping.tgChatId,
-      message_thread_id: mapping.tgThreadId,
-      action: "typing",
-    });
+    await ctx.replyWithChatAction("typing");
 
     try {
       const response = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
@@ -940,44 +978,199 @@ export class TelegramBot {
       });
 
       if (!response.ok || !response.body) {
-        const errData = await response.json();
+        const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error?.message || "API completion failed.");
       }
 
-      // Read text stream fully
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = "";
+      const generator = this.getStreamGenerator(response);
 
+      const sentMessages = await ctx.replyWithStream(generator, {
+        message_thread_id: mapping.tgThreadId,
+      });
+
+      if (sentMessages && sentMessages.length > 0) {
+        const lastMsgId = sentMessages[sentMessages.length - 1].message_id;
+        await this.db.collection<TgChatMapping>("tgChats").updateOne(
+          { _id: mapping._id },
+          { $set: { lastAssistantTgMessageId: lastMsgId } }
+        );
+      }
+    } catch (err: any) {
+      console.error("FAILED TO GENERATE in Telegram bot handleChatReply:", err);
+      const errorMsg = `❌ API Error: ${err.message}`;
+      const sentErr = await ctx.reply(errorMsg, {
+        message_thread_id: mapping.tgThreadId,
+      });
+      if (sentErr) {
+        await this.db.collection<TgChatMapping>("tgChats").updateOne(
+          { _id: mapping._id },
+          { $set: { lastAssistantTgMessageId: sentErr.message_id } }
+        );
+      }
+    }
+  }
+
+  private async* getStreamGenerator(response: Response) {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("No response body stream available.");
+    }
+    const decoder = new TextDecoder();
+    try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        assistantText += decoder.decode(value);
+        yield decoder.decode(value);
+      }
+    } catch (err: any) {
+      console.error("Stream reading error:", err);
+      yield `\n\n❌ Stream interrupted: ${err.message}`;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  private async handleRegen(ctx: BotContext) {
+    const message = ctx.message;
+    if (!message) return;
+    const chat = message.chat;
+    const from = message.from;
+    const threadId = message.message_thread_id;
+    if (!from) return;
+
+    if (!threadId) {
+      await ctx.reply("⚠️ The /regen command can only be used in a character topic thread.", {
+        message_thread_id: threadId,
+      });
+      return;
+    }
+
+    const mapping = await this.db.collection<TgChatMapping>("tgChats").findOne({
+      tgChatId: chat.id,
+      tgThreadId: threadId,
+    });
+
+    if (!mapping) {
+      await ctx.reply("⚠️ This thread is not associated with an AI character chat.", {
+        message_thread_id: threadId,
+      });
+      return;
+    }
+
+    let targetMessageId = mapping.lastAssistantTgMessageId;
+
+    if (targetMessageId) {
+      try {
+        await ctx.api.editMessageText(chat.id, targetMessageId, "⏳ Regenerating...");
+      } catch (err) {
+        console.warn("Could not edit message, sending new one instead:", err);
+        const newMsg = await ctx.reply("⏳ Regenerating...", {
+          message_thread_id: threadId,
+        });
+        targetMessageId = newMsg.message_id;
+        await this.db.collection<TgChatMapping>("tgChats").updateOne(
+          { _id: mapping._id },
+          { $set: { lastAssistantTgMessageId: targetMessageId } }
+        );
+      }
+    } else {
+      const newMsg = await ctx.reply("⏳ Regenerating...", {
+        message_thread_id: threadId,
+      });
+      targetMessageId = newMsg.message_id;
+      await this.db.collection<TgChatMapping>("tgChats").updateOne(
+        { _id: mapping._id },
+        { $set: { lastAssistantTgMessageId: targetMessageId } }
+      );
+    }
+
+    try {
+      const delResponse = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": mapping.clerkUserId,
+        },
+      });
+      if (!delResponse.ok) {
+        console.warn("Failed to delete last message in API during regen:", await delResponse.text());
+      }
+    } catch (err) {
+      console.warn("Failed to contact DELETE API during regen:", err);
+    }
+
+    await ctx.replyWithChatAction("typing");
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": mapping.clerkUserId,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok || !response.body) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || "API completion failed.");
       }
 
-      if (assistantText.trim()) {
+      await this.streamToExistingMessage(chat.id, targetMessageId!, response);
+    } catch (err: any) {
+      console.error("FAILED TO GENERATE during /regen:", err);
+      await ctx.api.editMessageText(chat.id, targetMessageId!, `❌ API Error: ${err.message}`).catch(() => {});
+    }
+  }
+
+  private async streamToExistingMessage(
+    chatId: number,
+    messageId: number,
+    response: Response
+  ) {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("No response body stream available.");
+    }
+    const decoder = new TextDecoder();
+    let fullText = "";
+    let lastUpdate = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += decoder.decode(value);
+
+        const now = Date.now();
+        if (now - lastUpdate > 1000 && fullText.trim()) {
+          try {
+            await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
+              parse_mode: "Markdown",
+            });
+          } catch (e) {
+            await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
+          }
+          lastUpdate = now;
+        }
+      }
+
+      if (fullText.trim()) {
         try {
-          await this.sendTelegram("sendMessage", {
-            chat_id: mapping.tgChatId,
-            message_thread_id: mapping.tgThreadId,
-            text: assistantText,
+          await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
             parse_mode: "Markdown",
           });
-        } catch (err) {
-          // Fallback to plain text if Markdown parsing fails
-          await this.sendTelegram("sendMessage", {
-            chat_id: mapping.tgChatId,
-            message_thread_id: mapping.tgThreadId,
-            text: assistantText,
-          });
+        } catch (e) {
+          await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
         }
       }
     } catch (err: any) {
-      await this.sendTelegram("sendMessage", {
-        chat_id: mapping.tgChatId,
-        message_thread_id: mapping.tgThreadId,
-        text: `❌ API Error: ${err.message}`,
-      });
+      console.error("Error streaming to existing message:", err);
+      fullText += `\n\n❌ Stream interrupted: ${err.message}`;
+      await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
+    } finally {
+      reader.releaseLock();
     }
   }
 
