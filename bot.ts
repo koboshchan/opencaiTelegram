@@ -1145,7 +1145,8 @@ export class TelegramBot {
     }
     const decoder = new TextDecoder();
     let fullText = "";
-    let lastUpdate = 0;
+    let lastSentText = "";
+    let lastUpdate = Date.now();
 
     try {
       while (true) {
@@ -1154,7 +1155,11 @@ export class TelegramBot {
         fullText += decoder.decode(value);
 
         const now = Date.now();
-        if (now - lastUpdate > 1000 && fullText.trim()) {
+        const unsentPart = fullText.slice(lastSentText.length);
+        const hasNewline = unsentPart.includes("\n");
+        const timeFallback = now - lastUpdate > 3000;
+
+        if ((hasNewline || timeFallback) && fullText.trim() !== lastSentText.trim()) {
           try {
             await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
               parse_mode: "Markdown",
@@ -1162,11 +1167,12 @@ export class TelegramBot {
           } catch (e) {
             await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
           }
+          lastSentText = fullText;
           lastUpdate = now;
         }
       }
 
-      if (fullText.trim()) {
+      if (fullText.trim() !== lastSentText.trim()) {
         try {
           await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
             parse_mode: "Markdown",
