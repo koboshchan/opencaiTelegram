@@ -1,9 +1,8 @@
 import { Db, ObjectId } from "mongodb";
 import crypto from "crypto";
 import { Bot, Context } from "grammy";
-import { stream, StreamFlavor } from "@grammyjs/stream";
 
-type BotContext = StreamFlavor<Context>;
+type BotContext = Context;
 
 interface UserLink {
   _id?: ObjectId;
@@ -62,7 +61,6 @@ export class TelegramBot {
     this.botSecret = botSecret;
 
     this.grammyBot = new Bot<BotContext>(this.botToken);
-    this.grammyBot.use(stream());
 
     this.setupGrammyHandlers();
   }
@@ -959,7 +957,7 @@ export class TelegramBot {
 
   private async handleChatReply(ctx: BotContext, mapping: TgChatMapping) {
     const message = ctx.message;
-    if (!message) return;
+    if (!message || !ctx.chat) return;
     const text = message.text?.trim();
     if (!text) return;
 
@@ -983,19 +981,16 @@ export class TelegramBot {
         throw new Error(errData.error?.message || "API completion failed.");
       }
 
-      const generator = this.getStreamGenerator(response);
-
-      const sentMessages = await ctx.replyWithStream(generator, {
+      const placeholderMsg = await ctx.reply("⏳ ...", {
         message_thread_id: mapping.tgThreadId,
       });
+      const lastMsgId = placeholderMsg.message_id;
+      await this.db.collection<TgChatMapping>("tgChats").updateOne(
+        { _id: mapping._id },
+        { $set: { lastAssistantTgMessageId: lastMsgId } }
+      );
 
-      if (sentMessages && sentMessages.length > 0) {
-        const lastMsgId = sentMessages[sentMessages.length - 1].message_id;
-        await this.db.collection<TgChatMapping>("tgChats").updateOne(
-          { _id: mapping._id },
-          { $set: { lastAssistantTgMessageId: lastMsgId } }
-        );
-      }
+      await this.streamToExistingMessage(ctx.chat.id, lastMsgId, response);
     } catch (err: any) {
       console.error("FAILED TO GENERATE in Telegram bot handleChatReply:", err);
       const errorMsg = `❌ API Error: ${err.message}`;

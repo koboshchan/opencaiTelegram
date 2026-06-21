@@ -11,8 +11,7 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "mongodb": "^6.5.0",
-    "grammy": "^1.21.1",
-    "@grammyjs/stream": "^1.1.0"
+    "grammy": "^1.21.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
