@@ -1147,19 +1147,25 @@ export class TelegramBot {
     let fullText = "";
     let lastSentText = "";
     let lastUpdate = Date.now();
+    let chunkIndex = 0;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        fullText += decoder.decode(value);
+        
+        const chunkText = decoder.decode(value);
+        chunkIndex++;
+        console.log(`[Stream] Chunk #${chunkIndex} received: length=${chunkText.length}, text=${JSON.stringify(chunkText)}`);
+        fullText += chunkText;
 
         const now = Date.now();
         const unsentPart = fullText.slice(lastSentText.length);
         const hasNewline = unsentPart.includes("\n");
-        const timeFallback = now - lastUpdate > 3000;
+        const timeFallback = now - lastUpdate > 1000;
 
         if ((hasNewline || timeFallback) && fullText.trim() !== lastSentText.trim()) {
+          console.log(`[Stream] Sending intermediate update to Telegram: length=${fullText.length}, hasNewline=${hasNewline}, timeFallback=${timeFallback}`);
           try {
             await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
               parse_mode: "Markdown",
@@ -1173,6 +1179,7 @@ export class TelegramBot {
       }
 
       if (fullText.trim() !== lastSentText.trim()) {
+        console.log(`[Stream] Sending final update to Telegram: length=${fullText.length}`);
         try {
           await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
             parse_mode: "Markdown",
