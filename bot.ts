@@ -22,11 +22,12 @@ interface WizardState {
   _id?: ObjectId;
   tgUserId: number;
   tgChatId: number;
-  step: "name" | "description" | "systemPrompt" | "visibility" | "import" | "profile_name" | "profile_description";
+  step: "name" | "description" | "systemPrompt" | "greeting" | "visibility" | "import" | "profile_name" | "profile_description";
   data: {
     name?: string;
     description?: string;
     systemPrompt?: string;
+    greeting?: string;
     visibility?: "public" | "private";
   };
   updatedAt: Date;
@@ -373,7 +374,7 @@ export class TelegramBot {
     await this.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: "🎨 *Character Creation Wizard*\n\nStep 1/4: What is the character's name?",
+      text: "🎨 *Character Creation Wizard*\n\nStep 1/5: What is the character's name?",
       parse_mode: "Markdown",
     });
   }
@@ -474,7 +475,7 @@ export class TelegramBot {
       await this.sendTelegram("sendMessage", {
         chat_id: chat.id,
         message_thread_id: threadId,
-        text: `Step 2/4: Enter a short description for ${text} (e.g. what is this character for?).`,
+        text: `Step 2/5: Enter a short description for ${text} (e.g. what is this character for?).`,
       });
     } else if (wizard.step === "description") {
       await this.db.collection<WizardState>("tgWizardState").updateOne(
@@ -490,14 +491,14 @@ export class TelegramBot {
       await this.sendTelegram("sendMessage", {
         chat_id: chat.id,
         message_thread_id: threadId,
-        text: `Step 3/4: Enter the system prompt / behavior details for ${wizard.data.name}.`,
+        text: `Step 3/5: Enter the system prompt / behavior details for ${wizard.data.name}.`,
       });
     } else if (wizard.step === "systemPrompt") {
       await this.db.collection<WizardState>("tgWizardState").updateOne(
         { _id: wizard._id },
         {
           $set: {
-            step: "visibility",
+            step: "greeting",
             "data.systemPrompt": text,
             updatedAt: new Date(),
           },
@@ -506,13 +507,31 @@ export class TelegramBot {
       await this.sendTelegram("sendMessage", {
         chat_id: chat.id,
         message_thread_id: threadId,
-        text: `Step 4/4: Visibility. Enter 'public' or 'private'.`,
+        text: `Step 4/5: Enter the official starting message / greeting for ${wizard.data.name} (or type 'none' to skip):`,
+      });
+    } else if (wizard.step === "greeting") {
+      const greetingVal = (text.toLowerCase() === "none" || text.toLowerCase() === "skip") ? "" : text;
+      await this.db.collection<WizardState>("tgWizardState").updateOne(
+        { _id: wizard._id },
+        {
+          $set: {
+            step: "visibility",
+            "data.greeting": greetingVal,
+            updatedAt: new Date(),
+          },
+        }
+      );
+      await this.sendTelegram("sendMessage", {
+        chat_id: chat.id,
+        message_thread_id: threadId,
+        text: `Step 5/5: Visibility. Enter 'public' or 'private'.`,
       });
     } else if (wizard.step === "visibility") {
       const visibility = text.toLowerCase() === "public" ? "public" : "private";
       const name = wizard.data.name!;
       const description = wizard.data.description!;
       const systemPrompt = wizard.data.systemPrompt!;
+      const greeting = wizard.data.greeting || undefined;
 
       // Complete Creation
       await this.sendTelegram("sendMessage", {
@@ -533,6 +552,7 @@ export class TelegramBot {
             name,
             description,
             systemPrompt,
+            greeting,
             visibility,
             tags: [],
           }),
@@ -857,39 +877,12 @@ export class TelegramBot {
       };
       await this.db.collection<TgChatMapping>("tgChats").insertOne(mapping);
 
-      // 4. Trigger the first message generation (character greeting)
-      await this.sendTelegram("sendChatAction", {
-        chat_id: chatId,
-        message_thread_id: newThreadId,
-        action: "typing",
-      });
-
-      const msgResponse = await fetch(`${this.apiBaseUrl}/api/chats/${openCaiChatId}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.botSecret}`,
-          "x-clerk-user-id": clerkUserId,
-        },
-        body: JSON.stringify({}),
-      });
-
-      let greetingText = "";
-      if (msgResponse.ok && msgResponse.body) {
-        const reader = (msgResponse.body as any).getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          greetingText += decoder.decode(value);
-        }
-      }
-
-      if (!greetingText.trim()) {
+      // 4. Send the character's official greeting directly to the topic thread
+      let greetingText = character.greeting?.trim() || "";
+      if (!greetingText) {
         greetingText = `👋 Hello! I am ${character.name}. Let's chat!`;
       }
 
-      // Send the character's greeting directly to the topic thread
       try {
         await this.sendTelegram("sendMessage", {
           chat_id: chatId,
