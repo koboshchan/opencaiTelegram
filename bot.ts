@@ -43,6 +43,7 @@ interface TgChatMapping {
   chatId: string;
   clerkUserId: string;
   lastAssistantTgMessageId?: number | null;
+  lastUserTgMessageId?: number | null;
   createdAt: Date;
 }
 
@@ -82,6 +83,25 @@ export class TelegramBot {
   private setupGrammyHandlers() {
     this.grammyBot.command("regen", async (ctx) => {
       await this.handleRegen(ctx);
+    });
+
+    this.grammyBot.on("edited_message", async (ctx) => {
+      const message = ctx.editedMessage;
+      const text = message?.text?.trim();
+      const chat = message?.chat;
+      const threadId = message?.message_thread_id;
+
+      if (text && !text.startsWith("/") && threadId && chat) {
+        const mapping = await this.db.collection<TgChatMapping>("tgChats").findOne({
+          tgChatId: chat.id,
+          tgThreadId: threadId,
+        });
+
+        if (mapping && mapping.lastUserTgMessageId === message.message_id) {
+          console.log(`[Edit] Last user message was edited in thread ${threadId}: ${text}`);
+          await this.handleEditReply(ctx, mapping);
+        }
+      }
     });
 
     this.grammyBot.on("message:text", async (ctx) => {
@@ -969,13 +989,165 @@ export class TelegramBot {
     }
   }
 
-  private async handleChatReply(ctx: BotContext, mapping: TgChatMapping) {
-    const message = ctx.message;
-    if (!message || !ctx.chat) return;
+  private async handleEditReply(ctx: BotContext, mapping: TgChatMapping) {
+    const message = ctx.editedMessage;
+    if (!message) return;
     const text = message.text?.trim();
     if (!text) return;
 
     await ctx.replyWithChatAction("typing");
+
+    // 1. Delete last assistant response from DB
+    try {
+      const delResponse = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": mapping.clerkUserId,
+        },
+      });
+      if (!delResponse.ok) {
+        console.warn("Failed to delete last message in API during edit:", await delResponse.text());
+      }
+    } catch (err) {
+      console.warn("Failed to contact DELETE API during edit:", err);
+    }
+
+    // 2. Update last user message in DB with the new edited text
+    try {
+      const patchResponse = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": mapping.clerkUserId,
+        },
+        body: JSON.stringify({
+          content: text,
+        }),
+      });
+      if (!patchResponse.ok) {
+        console.warn("Failed to update user message in API during edit:", await patchResponse.text());
+      }
+    } catch (err) {
+      console.warn("Failed to contact PATCH API during edit:", err);
+    }
+
+    // 3. Edit the existing bot Telegram message to "⏳ Regenerating..."
+    const targetMessageId = mapping.lastAssistantTgMessageId;
+    if (targetMessageId) {
+      try {
+        await ctx.api.editMessageText(ctx.chat!.id, targetMessageId, "⏳ Regenerating...");
+      } catch (err) {
+        console.warn("Could not edit message during edit regeneration:", err);
+      }
+    }
+
+    // 4. POST to trigger regeneration and stream the response
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.botSecret}`,
+          "x-clerk-user-id": mapping.clerkUserId,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok || !response.body) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || "API completion failed.");
+      }
+
+      await this.streamToExistingMessage(ctx.chat!.id, targetMessageId!, response);
+    } catch (err: any) {
+      console.error("FAILED TO GENERATE during edit regeneration:", err);
+      await ctx.api.editMessageText(ctx.chat!.id, targetMessageId!, `❌ API Error: ${err.message}`).catch(() => {});
+    }
+  }
+
+  async checkDeletedMessages() {
+    // Find all mappings that have both lastUserTgMessageId and lastAssistantTgMessageId set
+    const mappings = await this.db
+      .collection<TgChatMapping>("tgChats")
+      .find({
+        lastUserTgMessageId: { $ne: null, $exists: true },
+        lastAssistantTgMessageId: { $ne: null, $exists: true }
+      })
+      .toArray();
+
+    for (const mapping of mappings) {
+      const chatId = mapping.tgChatId;
+      const userMsgId = mapping.lastUserTgMessageId!;
+      const assistantMsgId = mapping.lastAssistantTgMessageId!;
+
+      let isDeleted = false;
+      try {
+        // Clear reactions on the user message. This acts as a lightweight check if the message exists.
+        // It succeeds silently if the message exists (clearing/doing nothing if no reaction exists).
+        // It fails with "message to react not found" if the message has been deleted.
+        await this.grammyBot.api.setMessageReaction(chatId, userMsgId, []);
+      } catch (err: any) {
+        const errMsg = String(err.message || "").toLowerCase();
+        if (errMsg.includes("message to react not found") || errMsg.includes("message not found") || errMsg.includes("message_to_react_not_found")) {
+          isDeleted = true;
+        }
+      }
+
+      if (isDeleted) {
+        console.log(`[Delete Sync] Detected deleted user message ${userMsgId} in chat ${chatId}. Syncing deletion.`);
+        
+        // 1. Delete bot reply on Telegram
+        try {
+          await this.grammyBot.api.deleteMessage(chatId, assistantMsgId);
+        } catch (e) {
+          console.warn(`[Delete Sync] Failed to delete assistant message ${assistantMsgId} on Telegram:`, e);
+        }
+
+        // 2. Delete both messages in web app DB
+        try {
+          const delResponse = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages?all=true`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${this.botSecret}`,
+              "x-clerk-user-id": mapping.clerkUserId,
+            },
+          });
+          if (!delResponse.ok) {
+            console.warn("[Delete Sync] Failed to delete messages in DB:", await delResponse.text());
+          }
+        } catch (err) {
+          console.warn("[Delete Sync] Failed to contact DELETE API:", err);
+        }
+
+        // 3. Clear message IDs in DB mapping
+        await this.db.collection<TgChatMapping>("tgChats").updateOne(
+          { _id: mapping._id },
+          {
+            $set: {
+              lastUserTgMessageId: null,
+              lastAssistantTgMessageId: null
+            }
+          }
+        );
+      }
+    }
+  }
+
+  private async handleChatReply(ctxOrMsg: BotContext | any, mapping: TgChatMapping) {
+    const isContext = ctxOrMsg && typeof ctxOrMsg.reply === "function";
+    const message = isContext ? ctxOrMsg.message : ctxOrMsg;
+    if (!message) return;
+    const chatId = isContext ? ctxOrMsg.chat.id : message.chat.id;
+    const text = message.text?.trim();
+    if (!text) return;
+
+    if (isContext) {
+      await ctxOrMsg.replyWithChatAction("typing");
+    } else {
+      await this.grammyBot.api.sendChatAction(chatId, "typing");
+    }
 
     try {
       const response = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
@@ -995,26 +1167,51 @@ export class TelegramBot {
         throw new Error(errData.error?.message || "API completion failed.");
       }
 
-      const placeholderMsg = await ctx.reply("⏳ ...", {
-        message_thread_id: mapping.tgThreadId,
-      });
+      let placeholderMsg;
+      if (isContext) {
+        placeholderMsg = await ctxOrMsg.reply("⏳ ...", {
+          message_thread_id: mapping.tgThreadId,
+        });
+      } else {
+        placeholderMsg = await this.grammyBot.api.sendMessage(chatId, "⏳ ...", {
+          message_thread_id: mapping.tgThreadId,
+        });
+      }
+
       const lastMsgId = placeholderMsg.message_id;
       await this.db.collection<TgChatMapping>("tgChats").updateOne(
         { _id: mapping._id },
-        { $set: { lastAssistantTgMessageId: lastMsgId } }
+        { 
+          $set: { 
+            lastAssistantTgMessageId: lastMsgId,
+            lastUserTgMessageId: message.message_id
+          } 
+        }
       );
 
-      await this.streamToExistingMessage(ctx.chat.id, lastMsgId, response);
+      await this.streamToExistingMessage(chatId, lastMsgId, response);
     } catch (err: any) {
       console.error("FAILED TO GENERATE in Telegram bot handleChatReply:", err);
       const errorMsg = `❌ API Error: ${err.message}`;
-      const sentErr = await ctx.reply(errorMsg, {
-        message_thread_id: mapping.tgThreadId,
-      });
+      let sentErr;
+      if (isContext) {
+        sentErr = await ctxOrMsg.reply(errorMsg, {
+          message_thread_id: mapping.tgThreadId,
+        });
+      } else {
+        sentErr = await this.grammyBot.api.sendMessage(chatId, errorMsg, {
+          message_thread_id: mapping.tgThreadId,
+        });
+      }
       if (sentErr) {
         await this.db.collection<TgChatMapping>("tgChats").updateOne(
           { _id: mapping._id },
-          { $set: { lastAssistantTgMessageId: sentErr.message_id } }
+          { 
+            $set: { 
+              lastAssistantTgMessageId: sentErr.message_id,
+              lastUserTgMessageId: message.message_id
+            } 
+          }
         );
       }
     }

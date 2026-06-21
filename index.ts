@@ -24,6 +24,15 @@ async function run() {
   const bot = new TelegramBot(db, botToken, apiBaseUrl, botSecret);
   await bot.init();
 
+  // Start periodic check for deleted user messages every 5 seconds
+  setInterval(async () => {
+    try {
+      await bot.checkDeletedMessages();
+    } catch (err) {
+      console.error("Error checking for deleted messages:", err);
+    }
+  }, 5000);
+
   let offset = 0;
   console.log("Starting Telegram updates polling loop...");
 
