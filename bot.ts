@@ -1343,55 +1343,47 @@ export class TelegramBot {
     const decoder = new TextDecoder();
     let fullText = "";
     let lastSentText = "";
-    let lastUpdate = Date.now();
     let chunkIndex = 0;
+
+    // Push edits to Telegram at a fixed cadence, decoupled from chunk arrival rate.
+    // This prevents the "all at once" problem when chunks arrive faster than the
+    // time threshold or the response has no newlines (e.g. single-paragraph roleplay).
+    const pushUpdate = async () => {
+      if (fullText.trim() && fullText !== lastSentText) {
+        const snapshot = fullText;
+        try {
+          await this.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
+            parse_mode: "Markdown",
+          });
+        } catch {
+          await this.grammyBot.api.editMessageText(chatId, messageId, snapshot).catch(() => {});
+        }
+        lastSentText = snapshot;
+      }
+    };
+
+    const intervalId = setInterval(pushUpdate, 600);
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
-        const chunkText = decoder.decode(value);
+
+        const chunkText = decoder.decode(value, { stream: true });
         chunkIndex++;
-        console.log(`[Stream] Chunk #${chunkIndex} received: length=${chunkText.length}, text=${JSON.stringify(chunkText)}`);
+        console.log(`[Stream] Chunk #${chunkIndex} received: length=${chunkText.length}`);
         fullText += chunkText;
-
-        const now = Date.now();
-        const unsentPart = fullText.slice(lastSentText.length);
-        const hasNewline = unsentPart.includes("\n");
-        const timeFallback = now - lastUpdate > 1000;
-
-        if ((hasNewline || timeFallback) && fullText.trim() !== lastSentText.trim()) {
-          console.log(`[Stream] Sending intermediate update to Telegram: length=${fullText.length}, hasNewline=${hasNewline}, timeFallback=${timeFallback}`);
-          try {
-            await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
-              parse_mode: "Markdown",
-            });
-          } catch (e) {
-            await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
-          }
-          lastSentText = fullText;
-          lastUpdate = now;
-        }
-      }
-
-      if (fullText.trim() !== lastSentText.trim()) {
-        console.log(`[Stream] Sending final update to Telegram: length=${fullText.length}`);
-        try {
-          await this.grammyBot.api.editMessageText(chatId, messageId, fullText, {
-            parse_mode: "Markdown",
-          });
-        } catch (e) {
-          await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
-        }
       }
     } catch (err: any) {
       console.error("Error streaming to existing message:", err);
       fullText += `\n\n❌ Stream interrupted: ${err.message}`;
-      await this.grammyBot.api.editMessageText(chatId, messageId, fullText).catch(() => {});
     } finally {
+      clearInterval(intervalId);
       reader.releaseLock();
     }
+
+    // Final push — send whatever is left that hasn't been sent yet.
+    await pushUpdate();
   }
 
   private async getUserLink(tgUserId: number) {
