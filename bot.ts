@@ -1143,11 +1143,37 @@ export class TelegramBot {
     const text = message.text?.trim();
     if (!text) return;
 
+    // Show typing immediately.
+    const sendTyping = () => this.grammyBot.api.sendChatAction(chatId, "typing").catch(() => {});
+    await sendTyping();
+
+    // Show the placeholder immediately — before the fetch — so the user sees
+    // feedback right away instead of waiting for the full TTFT from the model.
+    let placeholderMsg;
     if (isContext) {
-      await ctxOrMsg.replyWithChatAction("typing");
+      placeholderMsg = await ctxOrMsg.reply("⏳ ...", {
+        message_thread_id: mapping.tgThreadId,
+      });
     } else {
-      await this.grammyBot.api.sendChatAction(chatId, "typing");
+      placeholderMsg = await this.grammyBot.api.sendMessage(chatId, "⏳ ...", {
+        message_thread_id: mapping.tgThreadId,
+      });
     }
+
+    const lastMsgId = placeholderMsg.message_id;
+    await this.db.collection<TgChatMapping>("tgChats").updateOne(
+      { _id: mapping._id },
+      {
+        $set: {
+          lastAssistantTgMessageId: lastMsgId,
+          lastUserTgMessageId: message.message_id,
+        },
+      }
+    );
+
+    // Telegram's typing action expires after ~5 seconds. Keep refreshing it
+    // throughout the entire wait (TTFT + streaming).
+    const typingInterval = setInterval(sendTyping, 4000);
 
     try {
       const response = await fetch(`${this.apiBaseUrl}/api/chats/${mapping.chatId}/messages`, {
@@ -1157,9 +1183,7 @@ export class TelegramBot {
           Authorization: `Bearer ${this.botSecret}`,
           "x-clerk-user-id": mapping.clerkUserId,
         },
-        body: JSON.stringify({
-          content: text,
-        }),
+        body: JSON.stringify({ content: text }),
       });
 
       if (!response.ok || !response.body) {
@@ -1167,53 +1191,15 @@ export class TelegramBot {
         throw new Error(errData.error?.message || "API completion failed.");
       }
 
-      let placeholderMsg;
-      if (isContext) {
-        placeholderMsg = await ctxOrMsg.reply("⏳ ...", {
-          message_thread_id: mapping.tgThreadId,
-        });
-      } else {
-        placeholderMsg = await this.grammyBot.api.sendMessage(chatId, "⏳ ...", {
-          message_thread_id: mapping.tgThreadId,
-        });
-      }
-
-      const lastMsgId = placeholderMsg.message_id;
-      await this.db.collection<TgChatMapping>("tgChats").updateOne(
-        { _id: mapping._id },
-        { 
-          $set: { 
-            lastAssistantTgMessageId: lastMsgId,
-            lastUserTgMessageId: message.message_id
-          } 
-        }
-      );
-
       await this.streamToExistingMessage(chatId, lastMsgId, response);
     } catch (err: any) {
       console.error("FAILED TO GENERATE in Telegram bot handleChatReply:", err);
-      const errorMsg = `❌ API Error: ${err.message}`;
-      let sentErr;
-      if (isContext) {
-        sentErr = await ctxOrMsg.reply(errorMsg, {
-          message_thread_id: mapping.tgThreadId,
-        });
-      } else {
-        sentErr = await this.grammyBot.api.sendMessage(chatId, errorMsg, {
-          message_thread_id: mapping.tgThreadId,
-        });
-      }
-      if (sentErr) {
-        await this.db.collection<TgChatMapping>("tgChats").updateOne(
-          { _id: mapping._id },
-          { 
-            $set: { 
-              lastAssistantTgMessageId: sentErr.message_id,
-              lastUserTgMessageId: message.message_id
-            } 
-          }
-        );
-      }
+      await this.grammyBot.api
+        .editMessageText(chatId, lastMsgId, `❌ API Error: ${err.message}`)
+        .catch(() => {});
+    } finally {
+      // Stop typing only after streaming is fully done.
+      clearInterval(typingInterval);
     }
   }
 
