@@ -36,6 +36,14 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
 
   if (wizard.step === "import") {
     await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+    if (!text.startsWith("https://")) {
+      await bot.sendTelegram("sendMessage", {
+        chat_id: chat.id,
+        message_thread_id: threadId,
+        text: "❌ Invalid URL. Import URL must start with https://. Import aborted.",
+      });
+      return;
+    }
     await handleImport(bot, chat.id, from.id, link.clerkUserId, text, threadId);
     return;
   }
@@ -174,68 +182,145 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
     await bot.sendTelegram("sendMessage", {
       chat_id: chat.id,
       message_thread_id: threadId,
-      text: `Step 5/5: Visibility. Enter 'public' or 'private'.`,
+      text: "Step 5/5: Visibility. Please choose character visibility:",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🔓 Public", callback_data: "wizard_vis:public" },
+            { text: "🔒 Private", callback_data: "wizard_vis:private" }
+          ]
+        ]
+      }
     });
   } else if (wizard.step === "visibility") {
-    const visibility = text.toLowerCase() === "public" ? "public" : "private";
-    const name = wizard.data.name!;
-    const description = wizard.data.description!;
-    const systemPrompt = wizard.data.systemPrompt!;
-    const greeting = wizard.data.greeting || undefined;
-
-    // Complete Creation
     await bot.sendTelegram("sendMessage", {
       chat_id: chat.id,
       message_thread_id: threadId,
+      text: "⚠️ Please use the inline buttons above to select the visibility.",
+    });
+  }
+}
+
+export async function handleWizardVisibility(
+  bot: TelegramBot,
+  chatId: number,
+  tgUserId: number,
+  visibility: "public" | "private",
+  threadId?: number,
+  editMessageId?: number
+) {
+  const wizard = await bot.db.collection<WizardState>("tgWizardState").findOne({
+    tgUserId,
+    tgChatId: chatId,
+  });
+
+  if (!wizard || wizard.step !== "visibility") {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: "❌ Wizard session expired or already completed.",
+    });
+    return;
+  }
+
+  const link = await bot.getUserLink(tgUserId);
+  if (!link) {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: "❌ User authentication link not found.",
+    });
+    return;
+  }
+
+  const name = wizard.data.name!;
+  const description = wizard.data.description!;
+  const systemPrompt = wizard.data.systemPrompt!;
+  const greeting = wizard.data.greeting || undefined;
+
+  if (editMessageId) {
+    try {
+      await bot.sendTelegram("editMessageText", {
+        chat_id: chatId,
+        message_id: editMessageId,
+        text: `Saving character ${name}...`,
+      });
+    } catch {
+      // Ignored
+    }
+  } else {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
       text: `Saving character ${name}...`,
     });
+  }
 
-    try {
-      const response = await fetch(`${bot.apiBaseUrl}/api/characters`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${bot.botSecret}`,
-          "x-clerk-user-id": link.clerkUserId,
-        },
-        body: JSON.stringify({
-          name,
-          description,
-          systemPrompt,
-          greeting,
-          visibility,
-          tags: [],
-        }),
-      });
+  try {
+    const response = await fetch(`${bot.apiBaseUrl}/api/characters`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": link.clerkUserId,
+      },
+      body: JSON.stringify({
+        name,
+        description,
+        systemPrompt,
+        greeting,
+        visibility,
+        tags: [],
+      }),
+    });
 
-      const resData = await response.json();
-      if (response.ok) {
-        const charId = resData.character.id;
-        await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+    const resData = await response.json();
+    if (response.ok) {
+      const charId = resData.character.id;
+      await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
 
-        await bot.sendTelegram("sendMessage", {
-          chat_id: chat.id,
-          message_thread_id: threadId,
-          text: `🎉 *Character Created!*\n\n*Name*: ${name}\n*ID*: \`${charId}\``,
+      const text = `🎉 *Character Created!*\n\n*Name*: ${name}\n*ID*: \`${charId}\``;
+      const inlineKeyboard = [
+        [
+          { text: "💬 Start Chatting", callback_data: `start_chat:${charId}` },
+        ],
+      ];
+
+      if (editMessageId) {
+        await bot.sendTelegram("editMessageText", {
+          chat_id: chatId,
+          message_id: editMessageId,
+          text,
           parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "💬 Start Chatting", callback_data: `start_chat:${charId}` },
-              ],
-            ],
-          },
+          reply_markup: { inline_keyboard: inlineKeyboard },
         });
       } else {
-        throw new Error(resData.error?.message || "Creation failed.");
+        await bot.sendTelegram("sendMessage", {
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text,
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: inlineKeyboard },
+        });
       }
-    } catch (err: any) {
-      await bot.sendTelegram("sendMessage", {
-        chat_id: chat.id,
-        message_thread_id: threadId,
-        text: `❌ Failed to create character: ${err.message}. Starting over.`,
-      });
-      await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+    } else {
+      throw new Error(resData.error?.message || "Creation failed.");
     }
+  } catch (err: any) {
+    const text = `❌ Failed to create character: ${err.message}. Starting over.`;
+    if (editMessageId) {
+      await bot.sendTelegram("editMessageText", {
+        chat_id: chatId,
+        message_id: editMessageId,
+        text,
+      });
+    } else {
+      await bot.sendTelegram("sendMessage", {
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text,
+      });
+    }
+    await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
   }
 }

@@ -4,8 +4,8 @@ import { autoRetry } from "@grammyjs/auto-retry";
 import { BotContext, UserLink, AuthToken, WizardState, TgChatMapping } from "./src/types.js";
 import { markdownToHtml } from "./src/utils/markdown.js";
 import { handleStart, sendAuthLink } from "./src/handlers/auth.js";
-import { startCreateWizard, handleWizardInput } from "./src/handlers/wizard.js";
-import { handleImport, listCharacters, showCharacterDetails, initiateTopicChat, searchCharacters } from "./src/handlers/character.js";
+import { startCreateWizard, handleWizardInput, handleWizardVisibility } from "./src/handlers/wizard.js";
+import { handleImport, listCharacters, showCharacterDetails, initiateTopicChat, searchCharacters, promptDeleteCharacter, confirmDeleteCharacter, promptEditVisibility, setCharacterVisibility } from "./src/handlers/character.js";
 import { showProfile } from "./src/handlers/profile.js";
 import { handleChatReply, handleEditReply, handleRegen, checkDeletedMessages, handleThinkingToggle } from "./src/handlers/chat.js";
 
@@ -218,6 +218,14 @@ export class TelegramBot {
           return;
         }
         const url = parts[1];
+        if (!url.startsWith("https://")) {
+          await this.sendTelegram("sendMessage", {
+            chat_id: chat.id,
+            message_thread_id: threadId,
+            text: "❌ Invalid URL. Import URL must start with https://. Import aborted.",
+          });
+          return;
+        }
         await this.handleImport(chat.id, from.id, link.clerkUserId, url, threadId);
       } else if (command === "/characters") {
         await this.listCharacters(chat.id, from.id, link.clerkUserId, threadId);
@@ -332,6 +340,23 @@ export class TelegramBot {
       });
     } else if (data === "profile_refresh") {
       await this.showProfile(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id);
+    } else if (data.startsWith("delete_prompt:")) {
+      const charId = data.substring(14);
+      await promptDeleteCharacter(this, message.chat.id, link.clerkUserId, charId, threadId, message.message_id);
+    } else if (data.startsWith("delete_confirm:")) {
+      const charId = data.substring(15);
+      await confirmDeleteCharacter(this, message.chat.id, link.clerkUserId, charId, threadId, message.message_id);
+    } else if (data.startsWith("edit_vis_prompt:")) {
+      const charId = data.substring(16);
+      await promptEditVisibility(this, message.chat.id, link.clerkUserId, charId, threadId, message.message_id);
+    } else if (data.startsWith("set_vis:")) {
+      const parts = data.split(":");
+      const charId = parts[1];
+      const visibility = parts[2] as "public" | "private";
+      await setCharacterVisibility(this, message.chat.id, link.clerkUserId, charId, visibility, threadId, message.message_id);
+    } else if (data.startsWith("wizard_vis:")) {
+      const visibility = data.substring(11) as "public" | "private";
+      await handleWizardVisibility(this, message.chat.id, from.id, visibility, threadId, message.message_id);
     }
   }
 

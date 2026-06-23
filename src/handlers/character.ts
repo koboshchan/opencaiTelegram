@@ -189,6 +189,10 @@ export async function showCharacterDetails(
       [
         { text: "💬 Start Chat", callback_data: `start_chat:${character.id}` },
         { text: "⬅️ Back to List", callback_data: "list_chars:" },
+      ],
+      [
+        { text: "👁️ Edit Visibility", callback_data: `edit_vis_prompt:${character.id}` },
+        { text: "🗑️ Delete", callback_data: `delete_prompt:${character.id}` },
       ]
     ];
 
@@ -365,6 +369,201 @@ export async function searchCharacters(
       chat_id: chatId,
       message_thread_id: threadId,
       text: `❌ Search failed: ${err.message}`,
+    });
+  }
+}
+
+export async function promptDeleteCharacter(
+  bot: TelegramBot,
+  chatId: number,
+  clerkUserId: string,
+  charId: string,
+  threadId?: number,
+  editMessageId?: number
+) {
+  try {
+    const response = await fetch(`${bot.apiBaseUrl}/api/characters`, {
+      headers: {
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": clerkUserId,
+      },
+    });
+    const data = await response.json();
+    const character = (data.characters || []).find((c: any) => c.id === charId);
+
+    if (!character) {
+      await bot.sendTelegram("sendMessage", {
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text: "❌ Character not found.",
+      });
+      return;
+    }
+
+    const text = `⚠️ *Are you sure you want to delete character "${character.name}"?*\n\nThis action cannot be undone.`;
+    const inlineKeyboard = [
+      [
+        { text: "✅ Yes, Delete", callback_data: `delete_confirm:${charId}` },
+        { text: "❌ No, Cancel", callback_data: `details:${charId}` },
+      ]
+    ];
+
+    await bot.sendTelegram("editMessageText", {
+      chat_id: chatId,
+      message_id: editMessageId,
+      text,
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+  } catch (err: any) {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: `❌ Error: ${err.message}`,
+    });
+  }
+}
+
+export async function confirmDeleteCharacter(
+  bot: TelegramBot,
+  chatId: number,
+  clerkUserId: string,
+  charId: string,
+  threadId?: number,
+  editMessageId?: number
+) {
+  try {
+    const infoResponse = await fetch(`${bot.apiBaseUrl}/api/characters`, {
+      headers: {
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": clerkUserId,
+      },
+    });
+    const infoData = await infoResponse.json();
+    const character = (infoData.characters || []).find((c: any) => c.id === charId);
+    const charName = character ? character.name : "Character";
+
+    const response = await fetch(`${bot.apiBaseUrl}/api/characters/${charId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": clerkUserId,
+      },
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error?.message || "Delete failed.");
+    }
+
+    const text = `🗑️ Character *${charName}* has been successfully deleted.`;
+    const inlineKeyboard = [
+      [
+        { text: "⬅️ Back to List", callback_data: "list_chars:" },
+      ]
+    ];
+
+    await bot.sendTelegram("editMessageText", {
+      chat_id: chatId,
+      message_id: editMessageId,
+      text,
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+  } catch (err: any) {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: `❌ Failed to delete character: ${err.message}`,
+    });
+  }
+}
+
+export async function promptEditVisibility(
+  bot: TelegramBot,
+  chatId: number,
+  clerkUserId: string,
+  charId: string,
+  threadId?: number,
+  editMessageId?: number
+) {
+  try {
+    const response = await fetch(`${bot.apiBaseUrl}/api/characters`, {
+      headers: {
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": clerkUserId,
+      },
+    });
+    const data = await response.json();
+    const character = (data.characters || []).find((c: any) => c.id === charId);
+
+    if (!character) {
+      await bot.sendTelegram("sendMessage", {
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text: "❌ Character not found.",
+      });
+      return;
+    }
+
+    const text = `👁️ *Edit Visibility for character "${character.name}"*\n\nCurrent visibility: *${character.visibility}*\n\nSelect new visibility:`;
+    const inlineKeyboard = [
+      [
+        { text: "🔓 Public", callback_data: `set_vis:${charId}:public` },
+        { text: "🔒 Private", callback_data: `set_vis:${charId}:private` },
+      ],
+      [
+        { text: "⬅️ Back to Details", callback_data: `details:${charId}` }
+      ]
+    ];
+
+    await bot.sendTelegram("editMessageText", {
+      chat_id: chatId,
+      message_id: editMessageId,
+      text,
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+  } catch (err: any) {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: `❌ Error: ${err.message}`,
+    });
+  }
+}
+
+export async function setCharacterVisibility(
+  bot: TelegramBot,
+  chatId: number,
+  clerkUserId: string,
+  charId: string,
+  visibility: "public" | "private",
+  threadId?: number,
+  editMessageId?: number
+) {
+  try {
+    const response = await fetch(`${bot.apiBaseUrl}/api/characters/${charId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": clerkUserId,
+      },
+      body: JSON.stringify({ visibility }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error?.message || "Failed to update visibility.");
+    }
+
+    await showCharacterDetails(bot, chatId, clerkUserId, charId, threadId, editMessageId);
+  } catch (err: any) {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: `❌ Failed to update visibility: ${err.message}`,
     });
   }
 }
