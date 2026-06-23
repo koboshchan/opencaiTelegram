@@ -40,6 +40,12 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
     return;
   }
 
+  if (wizard.step === "search") {
+    await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
+    await bot.searchCharacters(chat.id, from.id, link.clerkUserId, text, threadId);
+    return;
+  }
+
   if (wizard.step === "profile_name") {
     await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
     try {

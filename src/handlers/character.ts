@@ -80,7 +80,8 @@ export async function listCharacters(
   tgUserId: number,
   clerkUserId: string,
   threadId?: number,
-  editMessageId?: number
+  editMessageId?: number,
+  page: number = 1
 ) {
   try {
     const response = await fetch(`${bot.apiBaseUrl}/api/characters`, {
@@ -97,21 +98,38 @@ export async function listCharacters(
       if (editMessageId) {
         await bot.sendTelegram("editMessageText", { chat_id: chatId, message_id: editMessageId, text });
       } else {
-        await bot.sendTelegram("sendMessage", { chat_id: chatId, message_id: editMessageId, message_thread_id: threadId, text });
+        await bot.sendTelegram("sendMessage", { chat_id: chatId, message_thread_id: threadId, text });
       }
       return;
     }
 
-    let text = "👥 *Your Characters*:\n\n";
+    const limit = 5;
+    const totalPages = Math.ceil(characters.length / limit);
+    const currentPage = Math.max(1, Math.min(page, totalPages));
+    const startIndex = (currentPage - 1) * limit;
+    const pageChars = characters.slice(startIndex, startIndex + limit);
+
+    let text = `👥 *Your Characters* (Page ${currentPage}/${totalPages}):\n\n`;
     const inlineKeyboard: any[] = [];
 
-    characters.forEach((char: any) => {
+    pageChars.forEach((char: any) => {
       text += `• *${char.name}* (ID: \`${char.id}\`)\n  _${char.description}_\n\n`;
       inlineKeyboard.push([
         { text: `ℹ️ ${char.name} details`, callback_data: `details:${char.id}` },
         { text: `💬 Chat`, callback_data: `start_chat:${char.id}` },
       ]);
     });
+
+    const navRow: any[] = [];
+    if (currentPage > 1) {
+      navRow.push({ text: "⬅️ Previous", callback_data: `list_chars:${currentPage - 1}` });
+    }
+    if (currentPage < totalPages) {
+      navRow.push({ text: "Next ➡️", callback_data: `list_chars:${currentPage + 1}` });
+    }
+    if (navRow.length > 0) {
+      inlineKeyboard.push(navRow);
+    }
 
     if (editMessageId) {
       await bot.sendTelegram("editMessageText", {
@@ -292,6 +310,61 @@ export async function initiateTopicChat(
       chat_id: chatId,
       message_thread_id: threadId,
       text: `❌ Failed to initiate chat: ${err.message}`,
+    });
+  }
+}
+
+export async function searchCharacters(
+  bot: TelegramBot,
+  chatId: number,
+  tgUserId: number,
+  clerkUserId: string,
+  query: string,
+  threadId?: number
+) {
+  try {
+    const response = await fetch(`${bot.apiBaseUrl}/api/characters/search?query=${encodeURIComponent(query)}`, {
+      headers: {
+        Authorization: `Bearer ${bot.botSecret}`,
+        "x-clerk-user-id": clerkUserId,
+      },
+    });
+    const data = await response.json();
+    const characters = data.characters || [];
+
+    if (!characters.length) {
+      await bot.sendTelegram("sendMessage", {
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text: `🔍 No characters found matching: *${query}*`,
+        parse_mode: "Markdown",
+      });
+      return;
+    }
+
+    let text = `🔍 *Search Results for "${query}"*:\n\n`;
+    const inlineKeyboard: any[] = [];
+
+    characters.forEach((char: any) => {
+      text += `• *${char.name}* (ID: \`${char.id}\`)\n  _${char.description}_\n\n`;
+      inlineKeyboard.push([
+        { text: `ℹ️ ${char.name} details`, callback_data: `details:${char.id}` },
+        { text: `💬 Chat`, callback_data: `start_chat:${char.id}` },
+      ]);
+    });
+
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text,
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+  } catch (err: any) {
+    await bot.sendTelegram("sendMessage", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: `❌ Search failed: ${err.message}`,
     });
   }
 }

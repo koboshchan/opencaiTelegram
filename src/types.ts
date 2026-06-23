@@ -24,7 +24,7 @@ export interface WizardState {
   _id?: ObjectId;
   tgUserId: number;
   tgChatId: number;
-  step: "name" | "description" | "systemPrompt" | "greeting" | "visibility" | "import" | "profile_name" | "profile_description";
+  step: "name" | "description" | "systemPrompt" | "greeting" | "visibility" | "import" | "profile_name" | "profile_description" | "search";
   data: {
     name?: string;
     description?: string;

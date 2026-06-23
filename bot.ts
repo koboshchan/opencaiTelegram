@@ -5,7 +5,7 @@ import { BotContext, UserLink, AuthToken, WizardState, TgChatMapping } from "./s
 import { markdownToHtml } from "./src/utils/markdown.js";
 import { handleStart, sendAuthLink } from "./src/handlers/auth.js";
 import { startCreateWizard, handleWizardInput } from "./src/handlers/wizard.js";
-import { handleImport, listCharacters, showCharacterDetails, initiateTopicChat } from "./src/handlers/character.js";
+import { handleImport, listCharacters, showCharacterDetails, initiateTopicChat, searchCharacters } from "./src/handlers/character.js";
 import { showProfile } from "./src/handlers/profile.js";
 import { handleChatReply, handleEditReply, handleRegen, checkDeletedMessages } from "./src/handlers/chat.js";
 
@@ -112,6 +112,7 @@ export class TelegramBot {
       const commands = [
         { command: "start", description: "Start the bot and link your account" },
         { command: "characters", description: "List your AI characters" },
+        { command: "search", description: "Search for AI characters" },
         { command: "create", description: "Create a new AI character" },
         { command: "import", description: "Import a character from Character.AI" },
         { command: "profile", description: "View and edit your user profile" },
@@ -215,6 +216,29 @@ export class TelegramBot {
         await this.handleImport(chat.id, from.id, link.clerkUserId, url, threadId);
       } else if (command === "/characters") {
         await this.listCharacters(chat.id, from.id, link.clerkUserId, threadId);
+      } else if (command === "/search") {
+        const parts = text.split(" ");
+        const query = parts.slice(1).join(" ").trim();
+        if (!query) {
+          await this.db.collection<WizardState>("tgWizardState").updateOne(
+            { tgUserId: from.id, tgChatId: chat.id },
+            {
+              $set: {
+                step: "search",
+                data: {},
+                updatedAt: new Date(),
+              },
+            },
+            { upsert: true }
+          );
+          await this.sendTelegram("sendMessage", {
+            chat_id: chat.id,
+            message_thread_id: threadId,
+            text: "🔍 Please send the name or description of the character you want to search for (or type /cancel to abort):",
+          });
+          return;
+        }
+        await this.searchCharacters(chat.id, from.id, link.clerkUserId, query, threadId);
       } else if (command === "/profile") {
         await this.showProfile(chat.id, from.id, link.clerkUserId, threadId);
       }
@@ -264,7 +288,9 @@ export class TelegramBot {
       const charId = data.substring(8);
       await this.showCharacterDetails(message.chat.id, link.clerkUserId, charId, threadId, message.message_id);
     } else if (data.startsWith("list_chars:")) {
-      await this.listCharacters(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id);
+      const pageStr = data.substring(11);
+      const page = parseInt(pageStr) || 1;
+      await this.listCharacters(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id, page);
     } else if (data === "profile_edit:name") {
       await this.db.collection<WizardState>("tgWizardState").updateOne(
         { tgUserId: from.id, tgChatId: message.chat.id },
@@ -325,8 +351,12 @@ export class TelegramBot {
     return handleImport(this, chatId, tgUserId, clerkUserId, url, threadId);
   }
 
-  public async listCharacters(chatId: number, tgUserId: number, clerkUserId: string, threadId?: number, editMessageId?: number) {
-    return listCharacters(this, chatId, tgUserId, clerkUserId, threadId, editMessageId);
+  public async listCharacters(chatId: number, tgUserId: number, clerkUserId: string, threadId?: number, editMessageId?: number, page: number = 1) {
+    return listCharacters(this, chatId, tgUserId, clerkUserId, threadId, editMessageId, page);
+  }
+
+  public async searchCharacters(chatId: number, tgUserId: number, clerkUserId: string, query: string, threadId?: number) {
+    return searchCharacters(this, chatId, tgUserId, clerkUserId, query, threadId);
   }
 
   public async showCharacterDetails(chatId: number, clerkUserId: string, charId: string, threadId?: number, editMessageId?: number) {
