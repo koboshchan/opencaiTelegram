@@ -50,8 +50,8 @@ export class TelegramBot {
   }
 
   private setupGrammyHandlers() {
-    this.grammyBot.command("regen", async (ctx) => {
-      await this.handleRegen(ctx);
+    this.grammyBot.command("regen", (ctx) => {
+      this.handleRegen(ctx).catch((err) => console.error("Error in handleRegen:", err));
     });
 
     this.grammyBot.command("thinking", async (ctx) => {
@@ -72,7 +72,7 @@ export class TelegramBot {
 
         if (mapping && mapping.lastUserTgMessageId === message.message_id) {
           console.log(`[Edit] Last user message was edited in thread ${threadId}: ${text}`);
-          await this.handleEditReply(ctx, mapping);
+          this.handleEditReply(ctx, mapping).catch((err) => console.error("Error in handleEditReply:", err));
         }
       }
     });
@@ -88,7 +88,7 @@ export class TelegramBot {
           tgThreadId: threadId,
         });
         if (mapping) {
-          await this.handleChatReply(ctx, mapping);
+          this.handleChatReply(ctx, mapping).catch((err) => console.error("Error in handleChatReply:", err));
           return;
         }
       }

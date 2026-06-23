@@ -45,7 +45,7 @@ async function run() {
 
       if (data.ok && data.result.length > 0) {
         for (const update of data.result) {
-          await bot.handleUpdate(update);
+          bot.handleUpdate(update).catch((err) => console.error("Error handling update:", err));
           offset = update.update_id + 1;
         }
       }
