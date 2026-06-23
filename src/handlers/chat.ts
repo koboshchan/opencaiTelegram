@@ -9,19 +9,24 @@ export async function handleChatReply(bot: TelegramBot, ctxOrMsg: BotContext | a
   const text = message.text?.trim();
   if (!text) return;
 
-  // Show typing immediately.
-  const sendTyping = () => bot.grammyBot.api.sendChatAction(chatId, "typing").catch(() => {});
+  // Show typing immediately inside the correct topic/thread
+  const sendTyping = () =>
+    bot.grammyBot.api
+      .sendChatAction(chatId, "typing", {
+        message_thread_id: mapping.tgThreadId,
+      })
+      .catch(() => {});
   await sendTyping();
 
   // Show the placeholder immediately — before the fetch — so the user sees
   // feedback right away instead of waiting for the full TTFT from the model.
   let placeholderMsg;
   if (isContext) {
-    placeholderMsg = await ctxOrMsg.reply("⏳ ...", {
+    placeholderMsg = await ctxOrMsg.reply("...", {
       message_thread_id: mapping.tgThreadId,
     });
   } else {
-    placeholderMsg = await bot.grammyBot.api.sendMessage(chatId, "⏳ ...", {
+    placeholderMsg = await bot.grammyBot.api.sendMessage(chatId, "...", {
       message_thread_id: mapping.tgThreadId,
     });
   }
@@ -48,6 +53,10 @@ export async function handleChatReply(bot: TelegramBot, ctxOrMsg: BotContext | a
         "Content-Type": "application/json",
         Authorization: `Bearer ${bot.botSecret}`,
         "x-clerk-user-id": mapping.clerkUserId,
+        "Accept": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
       },
       body: JSON.stringify({ content: text }),
     });
@@ -113,11 +122,11 @@ export async function handleEditReply(bot: TelegramBot, ctx: BotContext, mapping
     console.warn("Failed to contact PATCH API during edit:", err);
   }
 
-  // 3. Edit the existing bot Telegram message to "⏳ Regenerating..."
+  // 3. Edit the existing bot Telegram message to "..."
   const targetMessageId = mapping.lastAssistantTgMessageId;
   if (targetMessageId) {
     try {
-      await ctx.api.editMessageText(ctx.chat!.id, targetMessageId, "⏳ Regenerating...");
+      await ctx.api.editMessageText(ctx.chat!.id, targetMessageId, "...");
     } catch (err) {
       console.warn("Could not edit message during edit regeneration:", err);
     }
@@ -131,6 +140,10 @@ export async function handleEditReply(bot: TelegramBot, ctx: BotContext, mapping
         "Content-Type": "application/json",
         Authorization: `Bearer ${bot.botSecret}`,
         "x-clerk-user-id": mapping.clerkUserId,
+        "Accept": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
       },
       body: JSON.stringify({}),
     });
@@ -178,10 +191,10 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
 
   if (targetMessageId) {
     try {
-      await ctx.api.editMessageText(chat.id, targetMessageId, "⏳ Regenerating...");
+      await ctx.api.editMessageText(chat.id, targetMessageId, "...");
     } catch (err) {
       console.warn("Could not edit message, sending new one instead:", err);
-      const newMsg = await ctx.reply("⏳ Regenerating...", {
+      const newMsg = await ctx.reply("...", {
         message_thread_id: threadId,
       });
       targetMessageId = newMsg.message_id;
@@ -191,7 +204,7 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
       );
     }
   } else {
-    const newMsg = await ctx.reply("⏳ Regenerating...", {
+    const newMsg = await ctx.reply("...", {
       message_thread_id: threadId,
     });
     targetMessageId = newMsg.message_id;
@@ -225,6 +238,10 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${bot.botSecret}`,
         "x-clerk-user-id": mapping.clerkUserId,
+        "Accept": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
       },
       body: JSON.stringify({}),
     });
@@ -323,11 +340,56 @@ export async function streamToExistingMessage(
   let fullText = "";
   let lastSentText = "";
   let chunkIndex = 0;
+  let exhausted = false;
+  let running = true;
 
-  // Push edits to Telegram at a fixed cadence, decoupled from chunk arrival rate.
-  // This prevents the "all at once" problem when chunks arrive faster than the
-  // time threshold or the response has no newlines (e.g. single-paragraph roleplay).
-  const pushUpdate = async () => {
+  const pull = async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!running) break;
+
+        const chunkText = decoder.decode(value, { stream: true });
+        chunkIndex++;
+        console.log(`[Stream] Chunk #${chunkIndex} received: length=${chunkText.length}`);
+        fullText += chunkText;
+      }
+    } catch (err: any) {
+      console.error("Error reading stream:", err);
+      fullText += `\n\n❌ Stream interrupted: ${err.message}`;
+    } finally {
+      exhausted = true;
+      reader.releaseLock();
+    }
+  };
+
+  const push = async () => {
+    try {
+      while (!exhausted) {
+        if (fullText.trim() && fullText !== lastSentText) {
+          const snapshot = fullText;
+          try {
+            await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
+              parse_mode: "Markdown",
+            });
+            lastSentText = snapshot;
+          } catch {
+            try {
+              await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot);
+              lastSentText = snapshot;
+            } catch (err) {
+              console.warn("Failed to edit message in stream:", err);
+            }
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200)); // 1.2s cadence to avoid rate limits
+      }
+    } finally {
+      running = false;
+    }
+
+    // Final push
     if (fullText.trim() && fullText !== lastSentText) {
       const snapshot = fullText;
       try {
@@ -337,32 +399,10 @@ export async function streamToExistingMessage(
       } catch {
         await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot).catch(() => {});
       }
-      lastSentText = snapshot;
     }
   };
 
-  const intervalId = setInterval(pushUpdate, 600);
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunkText = decoder.decode(value, { stream: true });
-      chunkIndex++;
-      console.log(`[Stream] Chunk #${chunkIndex} received: length=${chunkText.length}`);
-      fullText += chunkText;
-    }
-  } catch (err: any) {
-    console.error("Error streaming to existing message:", err);
-    fullText += `\n\n❌ Stream interrupted: ${err.message}`;
-  } finally {
-    clearInterval(intervalId);
-    reader.releaseLock();
-  }
-
-  // Final push — send whatever is left that hasn't been sent yet.
-  await pushUpdate();
+  await Promise.all([pull(), push()]);
 }
 
 export async function* getStreamGenerator(response: Response) {

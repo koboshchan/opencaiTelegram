@@ -9,9 +9,11 @@
     "dev": "ts-node index.ts"
   },
   "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@grammyjs/stream": "^1.1.0",
     "dotenv": "^16.4.5",
-    "mongodb": "^6.5.0",
-    "grammy": "^1.21.1"
+    "grammy": "^1.44.0",
+    "mongodb": "^6.5.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

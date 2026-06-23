@@ -1,5 +1,6 @@
 import { Db } from "mongodb";
 import { Bot } from "grammy";
+import { autoRetry } from "@grammyjs/auto-retry";
 import { BotContext, UserLink, AuthToken, WizardState, TgChatMapping } from "./src/types.js";
 import { markdownToHtml } from "./src/utils/markdown.js";
 import { handleStart, sendAuthLink } from "./src/handlers/auth.js";
@@ -27,6 +28,9 @@ export class TelegramBot {
     this.botSecret = botSecret;
 
     this.grammyBot = new Bot<BotContext>(this.botToken);
+
+    // Configure auto-retry middleware to handle rate limits gracefully
+    this.grammyBot.api.config.use(autoRetry());
 
     // Transform all outgoing "Markdown" parse_mode calls to "HTML" using our markdownToHtml helper
     this.grammyBot.api.config.use((prev, method, payload, signal) => {
