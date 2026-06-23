@@ -376,7 +376,6 @@ export async function streamToExistingMessage(
 
         const chunkText = decoder.decode(value, { stream: true });
         chunkIndex++;
-        console.log(`[Stream] Chunk #${chunkIndex} received: length=${chunkText.length}`);
         fullText += chunkText;
       }
     } catch (err: any) {
