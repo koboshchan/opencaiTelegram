@@ -301,9 +301,11 @@ export class TelegramBot {
       const charId = data.substring(8);
       await this.showCharacterDetails(message.chat.id, link.clerkUserId, charId, threadId, message.message_id);
     } else if (data.startsWith("list_chars:")) {
-      const pageStr = data.substring(11);
-      const page = parseInt(pageStr) || 1;
-      await this.listCharacters(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id, page);
+      const payload = data.substring(11);
+      const parts = payload.split(":");
+      const page = parseInt(parts[0]) || 1;
+      const filterType = (parts[1] || "all") as "all" | "private";
+      await this.listCharacters(message.chat.id, from.id, link.clerkUserId, threadId, message.message_id, page, filterType);
     } else if (data === "profile_edit:name") {
       await this.db.collection<WizardState>("tgWizardState").updateOne(
         { tgUserId: from.id, tgChatId: message.chat.id },
@@ -381,8 +383,8 @@ export class TelegramBot {
     return handleImport(this, chatId, tgUserId, clerkUserId, url, threadId);
   }
 
-  public async listCharacters(chatId: number, tgUserId: number, clerkUserId: string, threadId?: number, editMessageId?: number, page: number = 1) {
-    return listCharacters(this, chatId, tgUserId, clerkUserId, threadId, editMessageId, page);
+  public async listCharacters(chatId: number, tgUserId: number, clerkUserId: string, threadId?: number, editMessageId?: number, page: number = 1, filterType: "all" | "private" = "all") {
+    return listCharacters(this, chatId, tgUserId, clerkUserId, threadId, editMessageId, page, filterType);
   }
 
   public async searchCharacters(chatId: number, tgUserId: number, clerkUserId: string, query: string, threadId?: number) {

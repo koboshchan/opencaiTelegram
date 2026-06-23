@@ -81,7 +81,8 @@ export async function listCharacters(
   clerkUserId: string,
   threadId?: number,
   editMessageId?: number,
-  page: number = 1
+  page: number = 1,
+  filterType: "all" | "private" = "all"
 ) {
   try {
     const response = await fetch(`${bot.apiBaseUrl}/api/characters`, {
@@ -91,14 +92,39 @@ export async function listCharacters(
       },
     });
     const data = await response.json();
-    const characters = data.characters || [];
+    let characters = data.characters || [];
+
+    if (filterType === "private") {
+      characters = characters.filter((c: any) => c.visibility === "private");
+    }
 
     if (!characters.length) {
-      const text = "📭 You don't own any characters yet. Use /create to create one.";
+      const text = filterType === "private"
+        ? "📭 You don't have any private characters."
+        : "📭 You don't own any characters yet. Use /create to create one.";
+      
+      const inlineKeyboard = [
+        [
+          filterType === "private"
+            ? { text: "🔓 Show All", callback_data: `list_chars:1:all` }
+            : { text: "🔒 Show Private Only", callback_data: `list_chars:1:private` }
+        ]
+      ];
+
       if (editMessageId) {
-        await bot.sendTelegram("editMessageText", { chat_id: chatId, message_id: editMessageId, text });
+        await bot.sendTelegram("editMessageText", {
+          chat_id: chatId,
+          message_id: editMessageId,
+          text,
+          reply_markup: { inline_keyboard: inlineKeyboard }
+        });
       } else {
-        await bot.sendTelegram("sendMessage", { chat_id: chatId, message_thread_id: threadId, text });
+        await bot.sendTelegram("sendMessage", {
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text,
+          reply_markup: { inline_keyboard: inlineKeyboard }
+        });
       }
       return;
     }
@@ -109,7 +135,8 @@ export async function listCharacters(
     const startIndex = (currentPage - 1) * limit;
     const pageChars = characters.slice(startIndex, startIndex + limit);
 
-    let text = `👥 *Your Characters* (Page ${currentPage}/${totalPages}):\n\n`;
+    const title = filterType === "private" ? "🔒 *Private Characters*" : "👥 *All Characters*";
+    let text = `${title} (Page ${currentPage}/${totalPages}):\n\n`;
     const inlineKeyboard: any[] = [];
 
     pageChars.forEach((char: any) => {
@@ -122,14 +149,21 @@ export async function listCharacters(
 
     const navRow: any[] = [];
     if (currentPage > 1) {
-      navRow.push({ text: "⬅️ Previous", callback_data: `list_chars:${currentPage - 1}` });
+      navRow.push({ text: "⬅️ Previous", callback_data: `list_chars:${currentPage - 1}:${filterType}` });
     }
     if (currentPage < totalPages) {
-      navRow.push({ text: "Next ➡️", callback_data: `list_chars:${currentPage + 1}` });
+      navRow.push({ text: "Next ➡️", callback_data: `list_chars:${currentPage + 1}:${filterType}` });
     }
     if (navRow.length > 0) {
       inlineKeyboard.push(navRow);
     }
+
+    // Add Toggle Button Row
+    inlineKeyboard.push([
+      filterType === "private"
+        ? { text: "🔓 Show All", callback_data: `list_chars:1:all` }
+        : { text: "🔒 Show Private Only", callback_data: `list_chars:1:private` }
+    ]);
 
     if (editMessageId) {
       await bot.sendTelegram("editMessageText", {
