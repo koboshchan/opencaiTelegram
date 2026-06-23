@@ -70,7 +70,7 @@ export async function handleChatReply(bot: TelegramBot, ctxOrMsg: BotContext | a
   } catch (err: any) {
     console.error("FAILED TO GENERATE in Telegram bot handleChatReply:", err);
     await bot.grammyBot.api
-      .editMessageText(chatId, lastMsgId, `❌ API Error: ${err.message}`)
+      .editMessageText(chatId, lastMsgId, `API Error: ${err.message}`)
       .catch(() => {});
   } finally {
     // Stop typing only after streaming is fully done.
@@ -156,7 +156,7 @@ export async function handleEditReply(bot: TelegramBot, ctx: BotContext, mapping
     await streamToExistingMessage(bot, ctx.chat!.id, targetMessageId!, response as any, !!mapping.thinkingEnabled);
   } catch (err: any) {
     console.error("FAILED TO GENERATE during edit regeneration:", err);
-    await ctx.api.editMessageText(ctx.chat!.id, targetMessageId!, `❌ API Error: ${err.message}`).catch(() => {});
+    await ctx.api.editMessageText(ctx.chat!.id, targetMessageId!, `API Error: ${err.message}`).catch(() => {});
   }
 }
 
@@ -169,7 +169,7 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
   if (!from) return;
 
   if (!threadId) {
-    await ctx.reply("⚠️ The /regen command can only be used in a character topic thread.", {
+    await ctx.reply("The /regen command can only be used in a character topic thread.", {
       message_thread_id: threadId,
     });
     return;
@@ -181,7 +181,7 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
   });
 
   if (!mapping) {
-    await ctx.reply("⚠️ This thread is not associated with an AI character chat.", {
+    await ctx.reply("This thread is not associated with an AI character chat.", {
       message_thread_id: threadId,
     });
     return;
@@ -254,7 +254,7 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
     await streamToExistingMessage(bot, chat.id, targetMessageId!, response as any, !!mapping.thinkingEnabled);
   } catch (err: any) {
     console.error("FAILED TO GENERATE during /regen:", err);
-    await ctx.api.editMessageText(chat.id, targetMessageId!, `❌ API Error: ${err.message}`).catch(() => {});
+    await ctx.api.editMessageText(chat.id, targetMessageId!, `API Error: ${err.message}`).catch(() => {});
   }
 }
 
@@ -380,7 +380,7 @@ export async function streamToExistingMessage(
       }
     } catch (err: any) {
       console.error("Error reading stream:", err);
-      fullText += `\n\n❌ Stream interrupted: ${err.message}`;
+      fullText += `\n\nStream interrupted: ${err.message}`;
     } finally {
       exhausted = true;
       reader.releaseLock();
@@ -488,7 +488,7 @@ export async function* getStreamGenerator(response: Response) {
     }
   } catch (err: any) {
     console.error("Stream reading error:", err);
-    yield `\n\n❌ Stream interrupted: ${err.message}`;
+    yield `\n\nStream interrupted: ${err.message}`;
   } finally {
     reader.releaseLock();
   }
@@ -501,7 +501,7 @@ export async function handleThinkingToggle(bot: TelegramBot, ctx: BotContext) {
   const threadId = message.message_thread_id;
 
   if (!threadId) {
-    await ctx.reply("⚠️ The /thinking command can only be used in a character topic thread.", {
+    await ctx.reply("The /thinking command can only be used in a character topic thread.", {
       message_thread_id: threadId,
     });
     return;
@@ -513,7 +513,7 @@ export async function handleThinkingToggle(bot: TelegramBot, ctx: BotContext) {
   });
 
   if (!mapping) {
-    await ctx.reply("⚠️ This thread is not associated with an AI character chat.", {
+    await ctx.reply("This thread is not associated with an AI character chat.", {
       message_thread_id: threadId,
     });
     return;
@@ -525,7 +525,7 @@ export async function handleThinkingToggle(bot: TelegramBot, ctx: BotContext) {
     { $set: { thinkingEnabled: newThinkingState } }
   );
 
-  await ctx.reply(`🧠 Thinking mode has been turned **${newThinkingState ? "ON" : "OFF"}** for this chat.`, {
+  await ctx.reply(`Thinking mode has been turned **${newThinkingState ? "ON" : "OFF"}** for this chat.`, {
     message_thread_id: threadId,
     parse_mode: "Markdown",
   });

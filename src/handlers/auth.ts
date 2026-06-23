@@ -39,14 +39,14 @@ export async function handleStart(bot: TelegramBot, message: any) {
           await bot.sendTelegram("sendMessage", {
             chat_id: chat.id,
             message_thread_id: threadId,
-            text: `🎉 Account successfully linked! You are logged in as Clerk User: ${clerkUserId}. You can now run bot commands.`,
+            text: `Account successfully linked! You are logged in as Clerk User: ${clerkUserId}. You can now run bot commands.`,
           });
           return;
         } else {
           await bot.sendTelegram("sendMessage", {
             chat_id: chat.id,
             message_thread_id: threadId,
-            text: "❌ Invalid or expired linking token. Please try again.",
+            text: "Invalid or expired linking token. Please try again.",
           });
           return;
         }
@@ -55,9 +55,9 @@ export async function handleStart(bot: TelegramBot, message: any) {
   }
 
   const isPrivate = chat.type === "private";
-  let welcomeText = "👋 Welcome to OpenCai Bot! Link your account to start managing and chatting with AI characters.\n\nUse /characters to see your list, /create to make one, or /import to import from Character.AI.";
+  let welcomeText = "Welcome to OpenCai Bot! Link your account to start managing and chatting with AI characters.\n\nUse /characters to see your list, /create to make one, or /import to import from Character.AI.";
   if (isPrivate) {
-    welcomeText += "\n\nℹ️ *Note*: This bot is designed to run in a Group Chat with Topics (Forum) enabled. Please add it to a topic-enabled group chat to use commands and chat with characters.";
+    welcomeText += "\n\n*Note*: This bot is designed to run in a Group Chat with Topics (Forum) enabled. Please add it to a topic-enabled group chat to use commands and chat with characters.";
   }
 
   await bot.sendTelegram("sendMessage", {
@@ -100,7 +100,7 @@ export async function sendAuthLink(
   await bot.sendTelegram("sendMessage", {
     chat_id: chatId,
     message_thread_id: threadId,
-    text: `🔐 *Authentication Required*\n\nPlease login with Clerk to link your Telegram account:\n\n[Login and Link Account](${authUrl})`,
+    text: `*Authentication Required*\n\nPlease login with Clerk to link your Telegram account:\n\n[Login and Link Account](${authUrl})`,
     parse_mode: "Markdown",
   });
 }

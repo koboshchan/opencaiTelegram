@@ -18,7 +18,7 @@ export async function startCreateWizard(bot: TelegramBot, chatId: number, tgUser
   await bot.sendTelegram("sendMessage", {
     chat_id: chatId,
     message_thread_id: threadId,
-    text: "🎨 *Character Creation Wizard*\n\nStep 1/5: What is the character's name?",
+    text: "*Character Creation Wizard*\n\nStep 1/5: What is the character's name?",
     parse_mode: "Markdown",
   });
 }
@@ -40,7 +40,7 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
       await bot.sendTelegram("sendMessage", {
         chat_id: chat.id,
         message_thread_id: threadId,
-        text: "❌ Invalid URL. Import URL must start with https://. Import aborted.",
+        text: "Invalid URL. Import URL must start with https://. Import aborted.",
       });
       return;
     }
@@ -71,7 +71,7 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
         await bot.sendTelegram("sendMessage", {
           chat_id: chat.id,
           message_thread_id: threadId,
-          text: `✅ Display name successfully updated to: *${resData.user.displayName}*`,
+          text: `Display name successfully updated to: *${resData.user.displayName}*`,
           parse_mode: "Markdown",
         });
       } else {
@@ -81,7 +81,7 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
       await bot.sendTelegram("sendMessage", {
         chat_id: chat.id,
         message_thread_id: threadId,
-        text: `❌ Failed to update name: ${err.message}`,
+        text: `Failed to update name: ${err.message}`,
       });
     }
     return;
@@ -104,7 +104,7 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
         await bot.sendTelegram("sendMessage", {
           chat_id: chat.id,
           message_thread_id: threadId,
-          text: `✅ Bio/description successfully updated!`,
+          text: `Bio/description successfully updated!`,
         });
       } else {
         throw new Error(resData.error?.message || "Failed to update profile.");
@@ -113,7 +113,7 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
       await bot.sendTelegram("sendMessage", {
         chat_id: chat.id,
         message_thread_id: threadId,
-        text: `❌ Failed to update bio: ${err.message}`,
+        text: `Failed to update bio: ${err.message}`,
       });
     }
     return;
@@ -186,8 +186,8 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🔓 Public", callback_data: "wizard_vis:public" },
-            { text: "🔒 Private", callback_data: "wizard_vis:private" }
+            { text: "Public", callback_data: "wizard_vis:public" },
+            { text: "Private", callback_data: "wizard_vis:private" }
           ]
         ]
       }
@@ -196,7 +196,7 @@ export async function handleWizardInput(bot: TelegramBot, message: any, wizard: 
     await bot.sendTelegram("sendMessage", {
       chat_id: chat.id,
       message_thread_id: threadId,
-      text: "⚠️ Please use the inline buttons above to select the visibility.",
+      text: "Please use the inline buttons above to select the visibility.",
     });
   }
 }
@@ -218,7 +218,7 @@ export async function handleWizardVisibility(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: "❌ Wizard session expired or already completed.",
+      text: "Wizard session expired or already completed.",
     });
     return;
   }
@@ -228,7 +228,7 @@ export async function handleWizardVisibility(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: "❌ User authentication link not found.",
+      text: "User authentication link not found.",
     });
     return;
   }
@@ -279,10 +279,10 @@ export async function handleWizardVisibility(
       const charId = resData.character.id;
       await bot.db.collection<WizardState>("tgWizardState").deleteOne({ _id: wizard._id });
 
-      const text = `🎉 *Character Created!*\n\n*Name*: ${name}\n*ID*: \`${charId}\``;
+      const text = `*Character Created!*\n\n*Name*: ${name}\n*ID*: \`${charId}\``;
       const inlineKeyboard = [
         [
-          { text: "💬 Start Chatting", callback_data: `start_chat:${charId}` },
+          { text: "Start Chatting", callback_data: `start_chat:${charId}` },
         ],
       ];
 
@@ -307,7 +307,7 @@ export async function handleWizardVisibility(
       throw new Error(resData.error?.message || "Creation failed.");
     }
   } catch (err: any) {
-    const text = `❌ Failed to create character: ${err.message}. Starting over.`;
+    const text = `Failed to create character: ${err.message}. Starting over.`;
     if (editMessageId) {
       await bot.sendTelegram("editMessageText", {
         chat_id: chatId,

@@ -172,7 +172,7 @@ export class TelegramBot {
         await this.sendTelegram("sendMessage", {
           chat_id: chat.id,
           message_thread_id: threadId,
-          text: "❌ Wizard or active action has been cancelled.",
+          text: "Wizard or active action has been cancelled.",
         });
         return;
       }
@@ -222,7 +222,7 @@ export class TelegramBot {
           await this.sendTelegram("sendMessage", {
             chat_id: chat.id,
             message_thread_id: threadId,
-            text: "❌ Invalid URL. Import URL must start with https://. Import aborted.",
+            text: "Invalid URL. Import URL must start with https://. Import aborted.",
           });
           return;
         }

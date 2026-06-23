@@ -12,7 +12,7 @@ export async function handleImport(
   await bot.sendTelegram("sendMessage", {
     chat_id: chatId,
     message_thread_id: threadId,
-    text: "📥 Importing character from Character.AI...",
+    text: "Importing character from Character.AI...",
   });
 
   try {
@@ -45,12 +45,12 @@ export async function handleImport(
         await bot.sendTelegram("sendMessage", {
           chat_id: chatId,
           message_thread_id: threadId,
-          text: `🎉 *Character Imported!*\n\n*Name*: ${latestChar.name}\n*ID*: \`${latestChar.id}\``,
+          text: `*Character Imported!*\n\n*Name*: ${latestChar.name}\n*ID*: \`${latestChar.id}\``,
           parse_mode: "Markdown",
           reply_markup: {
             inline_keyboard: [
               [
-                { text: "💬 Start Chatting", callback_data: `start_chat:${latestChar.id}` },
+                { text: "Start Chatting", callback_data: `start_chat:${latestChar.id}` },
               ],
             ],
           },
@@ -59,7 +59,7 @@ export async function handleImport(
         await bot.sendTelegram("sendMessage", {
           chat_id: chatId,
           message_thread_id: threadId,
-          text: "🎉 Character imported! Refresh your dashboard or run /characters to view.",
+          text: "Character imported! Refresh your dashboard or run /characters to view.",
         });
       }
     } else {
@@ -69,7 +69,7 @@ export async function handleImport(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Import failed: ${err.message}`,
+      text: `Import failed: ${err.message}`,
     });
   }
 }
@@ -100,14 +100,14 @@ export async function listCharacters(
 
     if (!characters.length) {
       const text = filterType === "private"
-        ? "📭 You don't have any private characters."
-        : "📭 You don't own any characters yet. Use /create to create one.";
+        ? "You don't have any private characters."
+        : "You don't own any characters yet. Use /create to create one.";
       
       const inlineKeyboard = [
         [
           filterType === "private"
-            ? { text: "🔓 Show All", callback_data: `list_chars:1:all` }
-            : { text: "🔒 Show Private Only", callback_data: `list_chars:1:private` }
+            ? { text: "Show All", callback_data: `list_chars:1:all` }
+            : { text: "Show Private Only", callback_data: `list_chars:1:private` }
         ]
       ];
 
@@ -135,24 +135,24 @@ export async function listCharacters(
     const startIndex = (currentPage - 1) * limit;
     const pageChars = characters.slice(startIndex, startIndex + limit);
 
-    const title = filterType === "private" ? "🔒 *Private Characters*" : "👥 *All Characters*";
+    const title = filterType === "private" ? "*Private Characters*" : "*All Characters*";
     let text = `${title} (Page ${currentPage}/${totalPages}):\n\n`;
     const inlineKeyboard: any[] = [];
 
     pageChars.forEach((char: any) => {
       text += `• *${char.name}* (ID: \`${char.id}\`)\n  _${char.description}_\n\n`;
       inlineKeyboard.push([
-        { text: `ℹ️ ${char.name} details`, callback_data: `details:${char.id}` },
-        { text: `💬 Chat`, callback_data: `start_chat:${char.id}` },
+        { text: `${char.name} details`, callback_data: `details:${char.id}` },
+        { text: `Chat`, callback_data: `start_chat:${char.id}` },
       ]);
     });
 
     const navRow: any[] = [];
     if (currentPage > 1) {
-      navRow.push({ text: "⬅️ Previous", callback_data: `list_chars:${currentPage - 1}:${filterType}` });
+      navRow.push({ text: "Previous", callback_data: `list_chars:${currentPage - 1}:${filterType}` });
     }
     if (currentPage < totalPages) {
-      navRow.push({ text: "Next ➡️", callback_data: `list_chars:${currentPage + 1}:${filterType}` });
+      navRow.push({ text: "Next", callback_data: `list_chars:${currentPage + 1}:${filterType}` });
     }
     if (navRow.length > 0) {
       inlineKeyboard.push(navRow);
@@ -161,8 +161,8 @@ export async function listCharacters(
     // Add Toggle Button Row
     inlineKeyboard.push([
       filterType === "private"
-        ? { text: "🔓 Show All", callback_data: `list_chars:1:all` }
-        : { text: "🔒 Show Private Only", callback_data: `list_chars:1:private` }
+        ? { text: "Show All", callback_data: `list_chars:1:all` }
+        : { text: "Show Private Only", callback_data: `list_chars:1:private` }
     ]);
 
     if (editMessageId) {
@@ -186,7 +186,7 @@ export async function listCharacters(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Failed to fetch characters: ${err.message}`,
+      text: `Failed to fetch characters: ${err.message}`,
     });
   }
 }
@@ -213,20 +213,20 @@ export async function showCharacterDetails(
       await bot.sendTelegram("sendMessage", {
         chat_id: chatId,
         message_thread_id: threadId,
-        text: "❌ Character not found.",
+        text: "Character not found.",
       });
       return;
     }
 
-    const text = `ℹ️ *Character Details*\n\n*Name*: ${character.name}\n*Description*: ${character.description}\n*Visibility*: ${character.visibility}\n\n*System Prompt*:\n\`\`\`\n${character.systemPrompt}\n\`\`\``;
+    const text = `*Character Details*\n\n*Name*: ${character.name}\n*Description*: ${character.description}\n*Visibility*: ${character.visibility}\n\n*System Prompt*:\n\`\`\`\n${character.systemPrompt}\n\`\`\``;
     const inlineKeyboard = [
       [
-        { text: "💬 Start Chat", callback_data: `start_chat:${character.id}` },
-        { text: "⬅️ Back to List", callback_data: "list_chars:" },
+        { text: "Start Chat", callback_data: `start_chat:${character.id}` },
+        { text: "Back to List", callback_data: "list_chars:" },
       ],
       [
-        { text: "👁️ Edit Visibility", callback_data: `edit_vis_prompt:${character.id}` },
-        { text: "🗑️ Delete", callback_data: `delete_prompt:${character.id}` },
+        { text: "Edit Visibility", callback_data: `edit_vis_prompt:${character.id}` },
+        { text: "Delete", callback_data: `delete_prompt:${character.id}` },
       ]
     ];
 
@@ -241,7 +241,7 @@ export async function showCharacterDetails(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Failed to fetch details: ${err.message}`,
+      text: `Failed to fetch details: ${err.message}`,
     });
   }
 }
@@ -317,7 +317,7 @@ export async function initiateTopicChat(
     // 4. Send the character's official greeting directly to the topic thread
     let greetingText = character.greeting?.trim() || "";
     if (!greetingText) {
-      greetingText = `👋 Hello! I am ${character.name}. Let's chat!`;
+      greetingText = `Hello! I am ${character.name}. Let's chat!`;
     }
 
     try {
@@ -340,14 +340,14 @@ export async function initiateTopicChat(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `💬 Topic *${character.name}* created successfully! Click on the topic thread to start chatting.`,
+      text: `Topic *${character.name}* created successfully! Click on the topic thread to start chatting.`,
       parse_mode: "Markdown",
     });
   } catch (err: any) {
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Failed to initiate chat: ${err.message}`,
+      text: `Failed to initiate chat: ${err.message}`,
     });
   }
 }
@@ -374,20 +374,20 @@ export async function searchCharacters(
       await bot.sendTelegram("sendMessage", {
         chat_id: chatId,
         message_thread_id: threadId,
-        text: `🔍 No characters found matching: *${query}*`,
+        text: `No characters found matching: *${query}*`,
         parse_mode: "Markdown",
       });
       return;
     }
 
-    let text = `🔍 *Search Results for "${query}"*:\n\n`;
+    let text = `*Search Results for "${query}"*:\n\n`;
     const inlineKeyboard: any[] = [];
 
     characters.forEach((char: any) => {
       text += `• *${char.name}* (ID: \`${char.id}\`)\n  _${char.description}_\n\n`;
       inlineKeyboard.push([
-        { text: `ℹ️ ${char.name} details`, callback_data: `details:${char.id}` },
-        { text: `💬 Chat`, callback_data: `start_chat:${char.id}` },
+        { text: `${char.name} details`, callback_data: `details:${char.id}` },
+        { text: `Chat`, callback_data: `start_chat:${char.id}` },
       ]);
     });
 
@@ -402,7 +402,7 @@ export async function searchCharacters(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Search failed: ${err.message}`,
+      text: `Search failed: ${err.message}`,
     });
   }
 }
@@ -429,16 +429,16 @@ export async function promptDeleteCharacter(
       await bot.sendTelegram("sendMessage", {
         chat_id: chatId,
         message_thread_id: threadId,
-        text: "❌ Character not found.",
+        text: "Character not found.",
       });
       return;
     }
 
-    const text = `⚠️ *Are you sure you want to delete character "${character.name}"?*\n\nThis action cannot be undone.`;
+    const text = `*Are you sure you want to delete character "${character.name}"?*\n\nThis action cannot be undone.`;
     const inlineKeyboard = [
       [
-        { text: "✅ Yes, Delete", callback_data: `delete_confirm:${charId}` },
-        { text: "❌ No, Cancel", callback_data: `details:${charId}` },
+        { text: "Yes, Delete", callback_data: `delete_confirm:${charId}` },
+        { text: "No, Cancel", callback_data: `details:${charId}` },
       ]
     ];
 
@@ -453,7 +453,7 @@ export async function promptDeleteCharacter(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Error: ${err.message}`,
+      text: `Error: ${err.message}`,
     });
   }
 }
@@ -490,10 +490,10 @@ export async function confirmDeleteCharacter(
       throw new Error(errData.error?.message || "Delete failed.");
     }
 
-    const text = `🗑️ Character *${charName}* has been successfully deleted.`;
+    const text = `Character *${charName}* has been successfully deleted.`;
     const inlineKeyboard = [
       [
-        { text: "⬅️ Back to List", callback_data: "list_chars:" },
+        { text: "Back to List", callback_data: "list_chars:" },
       ]
     ];
 
@@ -508,7 +508,7 @@ export async function confirmDeleteCharacter(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Failed to delete character: ${err.message}`,
+      text: `Failed to delete character: ${err.message}`,
     });
   }
 }
@@ -535,19 +535,19 @@ export async function promptEditVisibility(
       await bot.sendTelegram("sendMessage", {
         chat_id: chatId,
         message_thread_id: threadId,
-        text: "❌ Character not found.",
+        text: "Character not found.",
       });
       return;
     }
 
-    const text = `👁️ *Edit Visibility for character "${character.name}"*\n\nCurrent visibility: *${character.visibility}*\n\nSelect new visibility:`;
+    const text = `*Edit Visibility for character "${character.name}"*\n\nCurrent visibility: *${character.visibility}*\n\nSelect new visibility:`;
     const inlineKeyboard = [
       [
-        { text: "🔓 Public", callback_data: `set_vis:${charId}:public` },
-        { text: "🔒 Private", callback_data: `set_vis:${charId}:private` },
+        { text: "Public", callback_data: `set_vis:${charId}:public` },
+        { text: "Private", callback_data: `set_vis:${charId}:private` },
       ],
       [
-        { text: "⬅️ Back to Details", callback_data: `details:${charId}` }
+        { text: "Back to Details", callback_data: `details:${charId}` }
       ]
     ];
 
@@ -562,7 +562,7 @@ export async function promptEditVisibility(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Error: ${err.message}`,
+      text: `Error: ${err.message}`,
     });
   }
 }
@@ -597,7 +597,7 @@ export async function setCharacterVisibility(
     await bot.sendTelegram("sendMessage", {
       chat_id: chatId,
       message_thread_id: threadId,
-      text: `❌ Failed to update visibility: ${err.message}`,
+      text: `Failed to update visibility: ${err.message}`,
     });
   }
 }
