@@ -339,7 +339,7 @@ export async function streamToExistingMessage(
   }
   const decoder = new TextDecoder();
   let fullText = "";
-  let lastSentText = "";
+  let lastSentText = "...";
   let chunkIndex = 0;
   let exhausted = false;
   let running = true;
@@ -416,13 +416,23 @@ export async function streamToExistingMessage(
         });
         lastSentText = snapshot;
         lastPushTime = Date.now();
-      } catch {
+      } catch (err: any) {
+        const errMsg = String(err.message || "").toLowerCase();
+        if (errMsg.includes("message is not modified") || errMsg.includes("message_not_modified")) {
+          lastSentText = snapshot;
+          return;
+        }
         try {
           await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot);
           lastSentText = snapshot;
           lastPushTime = Date.now();
-        } catch (err) {
-          console.warn("Failed to edit message in stream:", err);
+        } catch (err2: any) {
+          const errMsg2 = String(err2.message || "").toLowerCase();
+          if (!errMsg2.includes("message is not modified") && !errMsg2.includes("message_not_modified")) {
+            console.warn("Failed to edit message in stream:", err2);
+          } else {
+            lastSentText = snapshot;
+          }
         }
       }
     };
@@ -446,8 +456,17 @@ export async function streamToExistingMessage(
         await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
           parse_mode: "Markdown",
         });
-      } catch {
-        await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot).catch(() => {});
+      } catch (err: any) {
+        const errMsg = String(err.message || "").toLowerCase();
+        if (errMsg.includes("message is not modified") || errMsg.includes("message_not_modified")) {
+          return;
+        }
+        await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot).catch((err2) => {
+          const errMsg2 = String(err2.message || "").toLowerCase();
+          if (!errMsg2.includes("message is not modified") && !errMsg2.includes("message_not_modified")) {
+            console.warn("Failed to edit final message in stream:", err2);
+          }
+        });
       }
     }
   };
