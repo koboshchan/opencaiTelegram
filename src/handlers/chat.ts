@@ -365,25 +365,51 @@ export async function streamToExistingMessage(
   };
 
   const push = async () => {
+    let lastPushTime = 0;
+    const minInterval = 1000; // 1 second minimum between edits
+
+    const canPush = () => {
+      const now = Date.now();
+      if (now - lastPushTime < minInterval) return false;
+      
+      const currentText = fullText.trim();
+      if (!currentText || currentText === lastSentText) return false;
+
+      const lastWordCount = lastSentText.split(/\s+/).filter(Boolean).length;
+      const currentWordCount = currentText.split(/\s+/).filter(Boolean).length;
+      
+      if (currentWordCount > lastWordCount) return true;
+      if (currentText.length - lastSentText.length >= 10) return true;
+      if (now - lastPushTime > 2000) return true;
+
+      return false;
+    };
+
+    const doPush = async () => {
+      const snapshot = fullText;
+      try {
+        await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
+          parse_mode: "Markdown",
+        });
+        lastSentText = snapshot;
+        lastPushTime = Date.now();
+      } catch {
+        try {
+          await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot);
+          lastSentText = snapshot;
+          lastPushTime = Date.now();
+        } catch (err) {
+          console.warn("Failed to edit message in stream:", err);
+        }
+      }
+    };
+
     try {
       while (!exhausted) {
-        if (fullText.trim() && fullText !== lastSentText) {
-          const snapshot = fullText;
-          try {
-            await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
-              parse_mode: "Markdown",
-            });
-            lastSentText = snapshot;
-          } catch {
-            try {
-              await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot);
-              lastSentText = snapshot;
-            } catch (err) {
-              console.warn("Failed to edit message in stream:", err);
-            }
-          }
+        if (canPush() || (lastSentText === "" && fullText.trim() !== "")) {
+          await doPush();
         }
-        await new Promise((resolve) => setTimeout(resolve, 1200)); // 1.2s cadence to avoid rate limits
+        await new Promise((resolve) => setTimeout(resolve, 100)); // check every 100ms
       }
     } finally {
       running = false;
