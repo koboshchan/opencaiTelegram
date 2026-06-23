@@ -9,8 +9,7 @@ const botSecret = process.env.TELEGRAM_BOT_SECRET!;
 
 async function main() {
   console.log("Connecting to MongoDB at:", mongodbUri);
-  // If mongodbUri points to mongo:27017 inside Docker, we might need to fallback to localhost:27017 if running outside docker.
-  const uri = mongodbUri.replace("mongo", "localhost");
+  const uri = mongodbUri;
   const client = new MongoClient(uri);
   try {
     await client.connect();
