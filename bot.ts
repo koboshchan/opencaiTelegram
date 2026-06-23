@@ -7,7 +7,7 @@ import { handleStart, sendAuthLink } from "./src/handlers/auth.js";
 import { startCreateWizard, handleWizardInput } from "./src/handlers/wizard.js";
 import { handleImport, listCharacters, showCharacterDetails, initiateTopicChat, searchCharacters } from "./src/handlers/character.js";
 import { showProfile } from "./src/handlers/profile.js";
-import { handleChatReply, handleEditReply, handleRegen, checkDeletedMessages } from "./src/handlers/chat.js";
+import { handleChatReply, handleEditReply, handleRegen, checkDeletedMessages, handleThinkingToggle } from "./src/handlers/chat.js";
 
 // Re-export types and functions to maintain compatibility with other modules
 export { BotContext, UserLink, AuthToken, WizardState, TgChatMapping };
@@ -52,6 +52,10 @@ export class TelegramBot {
   private setupGrammyHandlers() {
     this.grammyBot.command("regen", async (ctx) => {
       await this.handleRegen(ctx);
+    });
+
+    this.grammyBot.command("thinking", async (ctx) => {
+      await this.handleThinkingToggle(ctx);
     });
 
     this.grammyBot.on("edited_message", async (ctx) => {
@@ -117,6 +121,7 @@ export class TelegramBot {
         { command: "import", description: "Import a character from Character.AI" },
         { command: "profile", description: "View and edit your user profile" },
         { command: "regen", description: "Regenerate the last character response" },
+        { command: "thinking", description: "Toggle AI thinking text streaming" },
         { command: "cancel", description: "Cancel the active wizard or action" }
       ];
       const registerRes = await this.callTelegram("setMyCommands", { commands });
@@ -377,6 +382,10 @@ export class TelegramBot {
 
   public async handleRegen(ctx: BotContext) {
     return handleRegen(this, ctx);
+  }
+
+  public async handleThinkingToggle(ctx: BotContext) {
+    return handleThinkingToggle(this, ctx);
   }
 
   public async showProfile(chatId: number, tgUserId: number, clerkUserId: string, threadId?: number, editMessageId?: number) {

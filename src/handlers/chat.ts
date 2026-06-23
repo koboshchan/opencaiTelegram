@@ -66,7 +66,7 @@ export async function handleChatReply(bot: TelegramBot, ctxOrMsg: BotContext | a
       throw new Error(errData.error?.message || "API completion failed.");
     }
 
-    await streamToExistingMessage(bot, chatId, lastMsgId, response as any);
+    await streamToExistingMessage(bot, chatId, lastMsgId, response as any, !!mapping.thinkingEnabled);
   } catch (err: any) {
     console.error("FAILED TO GENERATE in Telegram bot handleChatReply:", err);
     await bot.grammyBot.api
@@ -153,7 +153,7 @@ export async function handleEditReply(bot: TelegramBot, ctx: BotContext, mapping
       throw new Error(errData.error?.message || "API completion failed.");
     }
 
-    await streamToExistingMessage(bot, ctx.chat!.id, targetMessageId!, response as any);
+    await streamToExistingMessage(bot, ctx.chat!.id, targetMessageId!, response as any, !!mapping.thinkingEnabled);
   } catch (err: any) {
     console.error("FAILED TO GENERATE during edit regeneration:", err);
     await ctx.api.editMessageText(ctx.chat!.id, targetMessageId!, `❌ API Error: ${err.message}`).catch(() => {});
@@ -251,7 +251,7 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
       throw new Error(errData.error?.message || "API completion failed.");
     }
 
-    await streamToExistingMessage(bot, chat.id, targetMessageId!, response as any);
+    await streamToExistingMessage(bot, chat.id, targetMessageId!, response as any, !!mapping.thinkingEnabled);
   } catch (err: any) {
     console.error("FAILED TO GENERATE during /regen:", err);
     await ctx.api.editMessageText(chat.id, targetMessageId!, `❌ API Error: ${err.message}`).catch(() => {});
@@ -330,7 +330,8 @@ export async function streamToExistingMessage(
   bot: TelegramBot,
   chatId: number,
   messageId: number,
-  response: Response
+  response: Response,
+  thinkingEnabled: boolean = false
 ) {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -342,6 +343,29 @@ export async function streamToExistingMessage(
   let chunkIndex = 0;
   let exhausted = false;
   let running = true;
+
+  const formatText = (rawText: string): string => {
+    const thinkStart = rawText.indexOf("<think>");
+    const thinkEnd = rawText.indexOf("</think>");
+
+    if (thinkStart !== -1) {
+      if (thinkEnd !== -1) {
+        // Thinking has finished.
+        const responseText = rawText.substring(thinkEnd + 8).trim();
+        return responseText || "...";
+      } else {
+        // Thinking is in progress.
+        const thinkingText = rawText.substring(thinkStart + 7).trim();
+        if (thinkingEnabled) {
+          return thinkingText ? `_${thinkingText}_` : "...";
+        } else {
+          return "...";
+        }
+      }
+    } else {
+      return rawText.trim() || "...";
+    }
+  };
 
   const pull = async () => {
     try {
@@ -372,7 +396,7 @@ export async function streamToExistingMessage(
       const now = Date.now();
       if (now - lastPushTime < minInterval) return false;
       
-      const currentText = fullText.trim();
+      const currentText = formatText(fullText);
       if (!currentText || currentText === lastSentText) return false;
 
       const lastWordCount = lastSentText.split(/\s+/).filter(Boolean).length;
@@ -386,7 +410,7 @@ export async function streamToExistingMessage(
     };
 
     const doPush = async () => {
-      const snapshot = fullText;
+      const snapshot = formatText(fullText);
       try {
         await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
           parse_mode: "Markdown",
@@ -406,7 +430,7 @@ export async function streamToExistingMessage(
 
     try {
       while (!exhausted) {
-        if (canPush() || (lastSentText === "" && fullText.trim() !== "")) {
+        if (canPush() || (lastSentText === "" && formatText(fullText) !== "...")) {
           await doPush();
         }
         await new Promise((resolve) => setTimeout(resolve, 100)); // check every 100ms
@@ -416,8 +440,9 @@ export async function streamToExistingMessage(
     }
 
     // Final push
-    if (fullText.trim() && fullText !== lastSentText) {
-      const snapshot = fullText;
+    const finalFormatted = formatText(fullText);
+    if (finalFormatted !== lastSentText) {
+      const snapshot = finalFormatted;
       try {
         await bot.grammyBot.api.editMessageText(chatId, messageId, snapshot, {
           parse_mode: "Markdown",
@@ -449,4 +474,41 @@ export async function* getStreamGenerator(response: Response) {
   } finally {
     reader.releaseLock();
   }
+}
+
+export async function handleThinkingToggle(bot: TelegramBot, ctx: BotContext) {
+  const message = ctx.message;
+  if (!message) return;
+  const chat = message.chat;
+  const threadId = message.message_thread_id;
+
+  if (!threadId) {
+    await ctx.reply("⚠️ The /thinking command can only be used in a character topic thread.", {
+      message_thread_id: threadId,
+    });
+    return;
+  }
+
+  const mapping = await bot.db.collection<TgChatMapping>("tgChats").findOne({
+    tgChatId: chat.id,
+    tgThreadId: threadId,
+  });
+
+  if (!mapping) {
+    await ctx.reply("⚠️ This thread is not associated with an AI character chat.", {
+      message_thread_id: threadId,
+    });
+    return;
+  }
+
+  const newThinkingState = !mapping.thinkingEnabled;
+  await bot.db.collection<TgChatMapping>("tgChats").updateOne(
+    { _id: mapping._id },
+    { $set: { thinkingEnabled: newThinkingState } }
+  );
+
+  await ctx.reply(`🧠 Thinking mode has been turned **${newThinkingState ? "ON" : "OFF"}** for this chat.`, {
+    message_thread_id: threadId,
+    parse_mode: "Markdown",
+  });
 }

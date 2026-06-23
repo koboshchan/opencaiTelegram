@@ -43,5 +43,6 @@ export interface TgChatMapping {
   clerkUserId: string;
   lastAssistantTgMessageId?: number | null;
   lastUserTgMessageId?: number | null;
+  thinkingEnabled?: boolean;
   createdAt: Date;
 }
