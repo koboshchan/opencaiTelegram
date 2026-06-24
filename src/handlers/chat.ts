@@ -58,7 +58,10 @@ export async function handleChatReply(bot: TelegramBot, ctxOrMsg: BotContext | a
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
       },
-      body: JSON.stringify({ content: text }),
+      body: JSON.stringify({
+        content: text,
+        thinkingEnabled: !!mapping.thinkingEnabled,
+      }),
     });
 
     if (!response.ok || !response.body) {
@@ -145,7 +148,9 @@ export async function handleEditReply(bot: TelegramBot, ctx: BotContext, mapping
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        thinkingEnabled: !!mapping.thinkingEnabled,
+      }),
     });
 
     if (!response.ok || !response.body) {
@@ -243,7 +248,9 @@ export async function handleRegen(bot: TelegramBot, ctx: BotContext) {
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        thinkingEnabled: !!mapping.thinkingEnabled,
+      }),
     });
 
     if (!response.ok || !response.body) {
@@ -355,12 +362,7 @@ export async function streamToExistingMessage(
         return responseText || "...";
       } else {
         // Thinking is in progress.
-        const thinkingText = rawText.substring(thinkStart + 7).trim();
-        if (thinkingEnabled) {
-          return thinkingText ? `_${thinkingText}_` : "...";
-        } else {
-          return "...";
-        }
+        return "...";
       }
     } else {
       return rawText.trim() || "...";
